@@ -1,0 +1,53 @@
+version: '3.1'
+
+services:
+
+  db:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_DB: $POSTGRES_DB
+      POSTGRES_USER: $POSTGRES_USER
+      POSTGRES_PASSWORD: $POSTGRES_PASSWD
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    volumes:
+      - database_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  adminer:
+    image: adminer
+    restart: always
+    environment:
+      ADMINER_DEFAULT_DRIVER: pgsql # server=mysql, pgsql, sqlite, sqlite2, oracle, mssql, mongo, elastic
+      ADMINER_DEFAULT_DB: $POSTGRES_DB
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DEFAULT_USERNAME: $POSTGRES_USER
+      ADMINER_DEFAULT_PASSWORD: $POSTGRES_PASSWD
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    configs:
+      - source: adminer-index.php
+        target: /var/www/html/index.php
+
+configs:
+  adminer-index.php:
+    content: |
+      <?php
+        if(!count($$_GET)) {
+          $$_POST['auth'] = [
+            'server' => $$_ENV['ADMINER_DEFAULT_SERVER'],
+            'username' => $$_ENV['ADMINER_DEFAULT_USERNAME'],
+            'password' => $$_ENV['ADMINER_DEFAULT_PASSWORD'],
+            'driver' => $$_ENV['ADMINER_DEFAULT_DRIVER'],
+            'db'    => $$_ENV['ADMINER_DEFAULT_DB'],
+          ];
+        }
+        include './adminer.php';
+      ?>
+
+volumes:
+  database_data:
+    driver: local
