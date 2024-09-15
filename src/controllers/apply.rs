@@ -1,6 +1,7 @@
 use sqlx::PgPool;
+use crate::types::Usr;
 
-pub(crate) async fn apply_user(conn: &PgPool, tele_id: i64, name: String) -> bool {
+pub(crate) async fn apply_user(conn: &PgPool, tele_id: i64, name: String) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         INSERT INTO apply (tele_id, name)
@@ -19,12 +20,12 @@ pub(crate) async fn apply_user(conn: &PgPool, tele_id: i64, name: String) -> boo
             log::info!("User with id: ({}) and name: ({}) applied", tele_id, name);
             log::debug!("Apply {:?}", res);
 
-            true
+            Ok(true)
         }
         Err(e) => {
             log::error!("Error inserting user application: {}", e);
 
-            false
+            Err(e)
         }
     }
 }

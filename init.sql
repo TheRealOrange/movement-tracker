@@ -6,6 +6,12 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$ LANGUAGE plpgsql;
 
+DO $$ BEGIN
+    CREATE TYPE role_type_enum AS ENUM ('pilot', 'aro');
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$ LANGUAGE plpgsql;
+
 
 DO $$ BEGIN
     CREATE TYPE ict_enum AS ENUM ('live', 'sims', 'other');
@@ -30,6 +36,7 @@ CREATE TABLE IF NOT EXISTS usrs (
     name TEXT NOT NULL,
     ops_name TEXT UNIQUE NOT NULL,
     usr_type user_type_enum NOT NULL,
+    role_type role_type_enum NOT NULL,
     admin BOOLEAN NOT NULL DEFAULT FALSE,
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()

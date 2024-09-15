@@ -1,4 +1,4 @@
-use crate::controllers::model::AvailabilityDetails;
+use crate::types::{AvailabilityDetails, Usr};
 use sqlx::types::chrono::NaiveDate;
 use sqlx::PgPool;
 
@@ -7,7 +7,7 @@ async fn set_attendance(
     tele_id: i64,
     date: NaiveDate,
     attended: bool,
-) -> (bool, Option<AvailabilityDetails>) {
+) -> Result<AvailabilityDetails, sqlx::Error> {
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
@@ -48,12 +48,12 @@ async fn set_attendance(
         Ok(res) => {
             log::info!("Attendance ({}) for ({}) on: ({})", res.attended, res.ops_name, date);
 
-            (true, Some(res))
+            Ok(res)
         }
         Err(e) => {
             log::error!("Error updating user attendance: {}", e);
 
-            (false, None)
+            Err(e)
         }
     }
 }

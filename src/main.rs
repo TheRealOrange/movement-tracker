@@ -1,7 +1,7 @@
 mod bot;
 mod controllers;
+pub(crate) mod types;
 
-use crate::bot::commands;
 use crate::controllers::db;
 use teloxide::prelude::*;
 
@@ -12,11 +12,8 @@ async fn main() {
 
     pretty_env_logger::init();
     log::info!("Initiating connection to database...");
-    db::init_db().await.expect("Failed to initialize database");
+    let conn_pool = db::init_db().await.expect("Failed to initialize database");
 
     log::info!("Starting command bot...");
-
-    let bot = Bot::from_env();
-
-    commands::Command::repl(bot, commands::answer).await;
+    bot::init_bot(conn_pool).await;
 }

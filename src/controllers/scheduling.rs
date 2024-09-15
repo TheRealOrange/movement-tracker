@@ -1,8 +1,8 @@
-use crate::controllers::model::{Availability, AvailabilityDetails, Ict};
+use crate::types::{Availability, AvailabilityDetails, Ict, Usr};
 use sqlx::types::chrono::NaiveDate;
 use sqlx::PgPool;
 
-async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> (bool, bool) {
+async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
@@ -36,12 +36,12 @@ async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> (bool
                 );
             }
 
-            (true, exists)
+            Ok(exists)
         }
         Err(e) => {
             log::error!("Error querying user availability: {}", e);
 
-            (false, false)
+            Err(e)
         }
     }
 }
@@ -51,7 +51,7 @@ async fn set_user_avail(
     date: NaiveDate,
     ict_type: Option<Ict>,
     remarks: Option<&str>,
-) -> (bool, Option<AvailabilityDetails>) {
+) -> Result<AvailabilityDetails, sqlx::Error> {
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
@@ -97,12 +97,12 @@ async fn set_user_avail(
         Ok(res) => {
             log::info!("Set availability for ({}) on: ({})", res.ops_name, date);
 
-            (true, Some(res))
+            Ok(res)
         }
         Err(e) => {
             log::error!("Error inserting user availability: {}", e);
 
-            (false, None)
+            Err(e)
         }
     }
 }
@@ -111,7 +111,7 @@ async fn set_user_unavail(
     conn: &PgPool,
     tele_id: i64,
     date: NaiveDate,
-) -> (bool, Option<AvailabilityDetails>) {
+) -> Result<AvailabilityDetails, sqlx::Error> {
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
@@ -150,12 +150,12 @@ async fn set_user_unavail(
         Ok(res) => {
             log::info!("Removed availability for ({}) on: ({})", res.ops_name, date);
 
-            (true, Some(res))
+            Ok(res)
         }
         Err(e) => {
             log::error!("Error inserting user availability: {}", e);
 
-            (false, None)
+            Err(e)
         }
     }
 }

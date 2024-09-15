@@ -1,6 +1,5 @@
 mod apply;
 mod attendance;
-pub(crate) mod db;
-mod model;
+pub(super) mod db;
 mod scheduling;
-mod user;
+pub(crate) mod user;

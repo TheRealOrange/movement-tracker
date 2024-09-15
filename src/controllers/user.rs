@@ -1,22 +1,23 @@
-use crate::controllers::model::Usr;
+use crate::types::{Usr, wrap_to_i64};
 use sqlx::PgPool;
+use teloxide::types::CountryCode::SO;
 
-async fn user_exists_tele_id(conn: &PgPool, tele_id: i64) -> (bool, bool) {
+pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM usrs
             WHERE usrs.tele_id = $1
-        );
+        ) AS "exists!";
         "#,
-        tele_id
+        wrap_to_i64(tele_id)
     )
     .fetch_one(conn)
     .await;
 
     match result {
         Ok(res) => {
-            let exists: bool = res.exists.unwrap_or(false);
+            let exists: bool = res.exists;
 
             if exists {
                 log::info!("User with telegram id: ({}) exists", tele_id);
@@ -24,23 +25,23 @@ async fn user_exists_tele_id(conn: &PgPool, tele_id: i64) -> (bool, bool) {
                 log::info!("User with telegram id: ({}) does not exist", tele_id);
             }
 
-            (true, exists)
+            Ok(exists)
         }
         Err(e) => {
             log::error!("Error querying user: {}", e);
 
-            (false, false)
+            Err(e)
         }
     }
 }
 
-async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> (bool, bool) {
+async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM usrs
             WHERE usrs.ops_name = $1
-        );
+        ) AS "exists!";
         "#,
         ops_name
     )
@@ -49,7 +50,7 @@ async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> (bool, bool) {
 
     match result {
         Ok(res) => {
-            let exists: bool = res.exists.unwrap_or(false);
+            let exists = res.exists;
 
             if exists {
                 log::info!("User with ops_name: ({}) exists", ops_name);
@@ -57,17 +58,17 @@ async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> (bool, bool) {
                 log::info!("User with ops_name: ({}) does not exist", ops_name);
             }
 
-            (true, exists)
+            Ok(exists)
         }
         Err(e) => {
             log::error!("Error querying user: {}", e);
 
-            (false, false)
+            Err(e)
         }
     }
 }
 
-async fn get_user_by_tele_id(conn: &PgPool, tele_id: i64) -> (bool, Option<Usr>) {
+pub(crate) async fn get_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<Usr, sqlx::Error> {
     let result = sqlx::query_as!(
         Usr,
         r#"
@@ -77,13 +78,14 @@ async fn get_user_by_tele_id(conn: &PgPool, tele_id: i64) -> (bool, Option<Usr>)
             usrs.name AS name,
             usrs.ops_name AS ops_name,
             usrs.usr_type AS "usr_type: _",
+            usrs.role_type AS "role_type: _",
             usrs.admin AS admin,
             usrs.created AS created,
             usrs.updated AS updated
         FROM usrs
         WHERE usrs.tele_id = $1;
         "#,
-        tele_id
+        wrap_to_i64(tele_id)
     )
     .fetch_one(conn)
     .await;
@@ -92,17 +94,17 @@ async fn get_user_by_tele_id(conn: &PgPool, tele_id: i64) -> (bool, Option<Usr>)
         Ok(res) => {
             log::info!("Get user by tele_id: {}", tele_id);
 
-            (true, Some(res))
+            Ok(res)
         }
         Err(e) => {
             log::error!("Error getting user: {}", e);
 
-            (false, None)
+            Err(e)
         }
     }
 }
 
-async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> (bool, Option<Usr>) {
+async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> Result<Usr, sqlx::Error> {
     let result = sqlx::query_as!(
         Usr,
         r#"
@@ -112,6 +114,7 @@ async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> (bool, Option<Us
             usrs.name AS name,
             usrs.ops_name AS ops_name,
             usrs.usr_type AS "usr_type: _",
+            usrs.role_type AS "role_type: _",
             usrs.admin AS admin,
             usrs.created AS created,
             usrs.updated AS updated
@@ -127,12 +130,12 @@ async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> (bool, Option<Us
         Ok(res) => {
             log::info!("Get user by ops_name: {}", ops_name);
 
-            (true, Some(res))
+            Ok(res)
         }
         Err(e) => {
             log::error!("Error getting user: {}", e);
 
-            (false, None)
+            Err(e)
         }
     }
 }
