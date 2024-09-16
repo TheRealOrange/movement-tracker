@@ -1,11 +1,12 @@
 use std::fmt;
-use enum_iterator::Sequence;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgHasArrayType, PgTypeInfo};
 use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
+use strum_macros::{AsRefStr, EnumIter, EnumString};
 
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, Sequence)]
+#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "user_type_enum", rename_all = "lowercase")]
+#[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum UsrType {
     ACTIVE,
     STAFF,
@@ -18,33 +19,9 @@ impl PgHasArrayType for UsrType {
     }
 }
 
-impl fmt::Display for UsrType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let out = match self {
-            UsrType::ACTIVE => "ACTIVE",
-            UsrType::STAFF => "STAFF",
-            UsrType::NS => "NS"
-        };
-        write!(f, "{}", out)
-    }
-}
-
-// Implement Into<String> for owned UsrType
-impl Into<String> for UsrType {
-    fn into(self) -> String {
-        self.to_string()
-    }
-}
-
-// Implement Into<String> for borrowed &UsrType
-impl Into<String> for &UsrType {
-    fn into(self) -> String {
-        self.to_string()
-    }
-}
-
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, Sequence)]
+#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "role_type_enum", rename_all = "lowercase")]
+#[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum RoleType {
     PILOT,
     ARO
@@ -56,32 +33,9 @@ impl PgHasArrayType for RoleType {
     }
 }
 
-impl fmt::Display for RoleType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let out = match self {
-            RoleType::PILOT => "PILOT",
-            RoleType::ARO => "ARO",
-        };
-        write!(f, "{}", out)
-    }
-}
-
-// Implement Into<String> for owned RoleType
-impl Into<String> for RoleType {
-    fn into(self) -> String {
-        self.to_string()
-    }
-}
-
-// Implement Into<String> for borrowed &RoleType
-impl Into<String> for &RoleType {
-    fn into(self) -> String {
-        self.to_string()
-    }
-}
-
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, Sequence)]
+#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "ict_enum", rename_all = "lowercase")]
+#[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum Ict {
     LIVE,
     SIMS,
@@ -91,32 +45,6 @@ pub(crate) enum Ict {
 impl PgHasArrayType for &Ict {
     fn array_type_info() -> PgTypeInfo {
         PgTypeInfo::with_name("_ict_enum")
-    }
-}
-
-// Implement the Display trait for RoleType
-impl fmt::Display for Ict {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let out = match self {
-            Ict::LIVE => "LIVE",
-            Ict::SIMS => "SIMS",
-            Ict::OTHER => "OTHER"
-        };
-        write!(f, "{}", out)
-    }
-}
-
-// Implement Into<String> for owned Ict
-impl Into<String> for Ict {
-    fn into(self) -> String {
-        self.to_string()
-    }
-}
-
-// Implement Into<String> for borrowed &Ict
-impl Into<String> for &Ict {
-    fn into(self) -> String {
-        self.to_string()
     }
 }
 

@@ -16,4 +16,5 @@ sqlx = { version = "0.7.3", features = ["runtime-tokio-native-tls", "postgres", 
 tokio = { version =  "1.8", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1.0.196", features = ["derive"] }
 dotenvy = "0.15.7"
-enum-iterator = "2.1.0"
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"

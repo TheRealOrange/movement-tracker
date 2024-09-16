@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS apply (
     id SERIAL PRIMARY KEY,
     tele_id INT8 UNIQUE NOT NULL,
     name TEXT NOT NULL,
+    ops_name TEXT UNIQUE NOT NULL,
+    usr_type user_type_enum NOT NULL,
+    role_type role_type_enum NOT NULL,
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );

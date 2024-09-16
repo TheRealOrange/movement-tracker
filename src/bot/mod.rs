@@ -24,7 +24,7 @@ pub(crate) async fn init_bot(pool: PgPool) {
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
             InMemStorage::<State>::new(), // Provide the InMemStorage in Arc
-            pool                                      // Provide the PgPool as well
+            pool                          // Provide the PgPool as well
         ])
         .enable_ctrlc_handler()
         .build()

@@ -1,4 +1,4 @@
-mod apply;
+pub(crate) mod apply;
 mod attendance;
 pub(super) mod db;
 mod scheduling;

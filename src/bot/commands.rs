@@ -1,5 +1,6 @@
 use teloxide::{prelude::*, utils::command::BotCommands};
-use super::MyDialogue;
+use crate::bot::state::State;
+use super::{send_msg, MyDialogue};
 use super::HandlerResult;
 
 #[derive(BotCommands, Clone)]
@@ -32,5 +33,21 @@ pub(super) async fn help(bot: Bot, msg: Message) -> HandlerResult {
 }
 
 pub(super) async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    todo!()
+    log::debug!("Command: cancel, Message: {:?}", msg);
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(user) = msg.from() {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::Start).await?;
+        return Ok(());
+    };
+    
+    send_msg(
+        bot.send_message(msg.chat.id, "Cancelling, returning to start!"),
+        &(user.username)
+    ).await;
+    
+    dialogue.update(State::Start).await?;
+    Ok(())
 }

@@ -5,10 +5,10 @@ use teloxide::dptree::{case, endpoint};
 use teloxide::payloads::SendMessage;
 use teloxide::requests::JsonRequest;
 use teloxide::types::{MessageId, User};
-use super::{send_msg, HandlerResult};
+use super::{send_msg, HandlerResult, MyDialogue};
 use super::commands::{cancel, Commands, help, PrivilegedCommands};
 
-use super::register::{register, register_ops_name, register_role, register_type};
+use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::user;
 use crate::controllers;
 use crate::types::{RoleType, Usr, UsrType};
@@ -22,13 +22,19 @@ pub(super) enum State {
     RegisterType {
         role_type: RoleType,
     },
+    RegisterName {
+        role_type: RoleType,
+        user_type: UsrType,
+    },
     RegisterOpsName {
         role_type: RoleType,
         user_type: UsrType,
+        name: String,
     },
     RegisterComplete {
         role_type: RoleType,
         user_type: UsrType,
+        name: String,
         ops_name: String,
     },
     Movement,
@@ -50,7 +56,8 @@ pub(super) enum State {
     },
     ChangeUserType {
         user_type: String
-    }
+    },
+    ErrorState
 }
 
 pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
@@ -69,11 +76,13 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         );
 
     let message_handler = Update::filter_message()
+        .branch(case![State::ErrorState].endpoint(error_state))
         .branch(command_handler)
         .branch(dptree::filter_async(check_admin)
             .branch(admin_command_handler))
-        .branch(case![State::RegisterOpsName { role_type, user_type }].endpoint(register_ops_name))
-        .branch(endpoint(invalid_state));
+        .branch(case![State::RegisterName { role_type, user_type }].endpoint(register_name))
+        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name))
+        .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete));
 
     let callback_query_handler = Update::filter_callback_query()
         .branch(case![State::RegisterRole].endpoint(register_role))
@@ -82,6 +91,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
         .branch(callback_query_handler)
+        .branch(endpoint(invalid_state))
 }
 
 // Function to handle "server is overloaded" message if connection acquisition fails
@@ -130,6 +140,24 @@ async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
     }
 }
 
-async fn invalid_state(bot: Bot, msg: Message) -> HandlerResult {
-    todo!()
+async fn error_state(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    log::info!("Reached error state");
+    send_msg(
+        bot.send_message(msg.chat.id, "Error occurred, returning to start!")
+            .reply_to_message_id(msg.id),
+        &None
+    ).await;
+    dialogue.update(State::Start).await?;
+    Ok(())
+}
+
+async fn invalid_state(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    log::info!("Reached an invalid state! (how did you do this?)");
+    send_msg(
+        bot.send_message(msg.chat.id, "Error occurred, returning to start!")
+            .reply_to_message_id(msg.id),
+        &None
+    ).await;
+    dialogue.update(State::Start).await?;
+    Ok(())
 }
