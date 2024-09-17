@@ -1,5 +1,7 @@
 START TRANSACTION;
 
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 DO $$ BEGIN
     CREATE TYPE user_type_enum AS ENUM ('staff', 'ns', 'active');
 EXCEPTION
@@ -31,7 +33,7 @@ $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS usrs (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tele_id INT8 UNIQUE NOT NULL,
     name TEXT NOT NULL,
     ops_name TEXT UNIQUE NOT NULL,
@@ -52,8 +54,9 @@ END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS apply (
-    id SERIAL PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tele_id INT8 UNIQUE NOT NULL,
+    chat_username TEXT NOT NULL,
     name TEXT NOT NULL,
     ops_name TEXT UNIQUE NOT NULL,
     usr_type user_type_enum NOT NULL,
@@ -72,8 +75,8 @@ END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS availability (
-    id SERIAL PRIMARY KEY,
-    usr_id INT4 REFERENCES usrs(id) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    usr_id UUID REFERENCES usrs(id) NOT NULL,
     avail DATE NOT NULL,
     ict_type ict_enum NOT NULL,
     remarks TEXT,
@@ -94,8 +97,8 @@ END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS movement (
-    id SERIAL PRIMARY KEY,
-    usr_id INT4 REFERENCES usrs(id) NOT NULL,
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    usr_id UUID REFERENCES usrs(id) NOT NULL,
     avail DATE NOT NULL,
     start_time TIME NOT NULL,
     end_time TIME NOT NULL,

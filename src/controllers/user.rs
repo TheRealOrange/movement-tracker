@@ -1,4 +1,4 @@
-use crate::types::{Usr, wrap_to_i64, RoleType, UsrType};
+use crate::types::{Usr, RoleType, UsrType};
 use sqlx::PgPool;
 use teloxide::types::CountryCode::SO;
 
@@ -10,7 +10,7 @@ pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<b
             WHERE usrs.tele_id = $1
         ) AS "exists!";
         "#,
-        wrap_to_i64(tele_id)
+        tele_id as i64
     )
     .fetch_one(conn)
     .await;
@@ -85,7 +85,7 @@ pub(crate) async fn get_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<U
         FROM usrs
         WHERE usrs.tele_id = $1;
         "#,
-        wrap_to_i64(tele_id)
+        tele_id as i64
     )
     .fetch_one(conn)
     .await;
@@ -165,7 +165,7 @@ pub(crate) async fn add_user(
             created,
             updated
         "#,
-        wrap_to_i64(tele_id),  // Assuming you have a function for converting u64 to i64
+        tele_id as i64,
         name,
         ops_name,
         role_type as RoleType,  // Casting the RoleType enum

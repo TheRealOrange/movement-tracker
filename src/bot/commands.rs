@@ -1,5 +1,6 @@
 use teloxide::{prelude::*, utils::command::BotCommands};
 use crate::bot::state::State;
+use crate::log_endpoint_hit;
 use super::{send_msg, MyDialogue};
 use super::HandlerResult;
 
@@ -23,17 +24,20 @@ pub(super) enum Commands {
     description = "These commands are supported:"
 )]
 pub(super) enum PrivilegedCommands {
+    #[command(description = "Approve registration requests")]
+    Approve,
     #[command(description = "Modify user attributes")]
     User,
 }
 
-pub(super) async fn help(bot: Bot, msg: Message) -> HandlerResult {
+pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "help", "Command", msg);
     bot.send_message(msg.chat.id, Commands::descriptions().to_string()).await?;
     Ok(())
 }
 
 pub(super) async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
-    log::debug!("Command: cancel, Message: {:?}", msg);
+    log_endpoint_hit!(dialogue.chat_id(), "cancel", "Command", msg);
     // Early return if the message has no sender (msg.from() is None)
     let user = if let Some(user) = msg.from() {
         user

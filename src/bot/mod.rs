@@ -13,7 +13,7 @@ pub(self) mod commands;
 pub(self) mod user;
 pub(self) mod state;
 pub(self) mod register;
-
+pub(self) mod apply;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -45,3 +45,40 @@ pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<Str
         }
     }
 }
+
+#[macro_export]
+macro_rules! log_endpoint_hit {
+    ($chat_id:expr, $fn_name:expr) => {
+        log::info!(
+            "Chat ID: {} triggered endpoint: {}",
+            $chat_id,
+            $fn_name
+        );
+    };
+    ($chat_id:expr, $fn_name:expr, $endpoint_type:expr, $data_debug:expr) => {
+        log::info!(
+            "Chat ID: {} triggered endpoint: {}",
+            $chat_id,
+            $fn_name
+        );
+        log::debug!("Endpoint: {}, {}: {:?}", $fn_name, $endpoint_type, $data_debug);
+    };
+    ($chat_id:expr, $fn_name:expr, $endpoint_type:expr, $data_debug:expr, $( $name:expr => $value:expr ),* ) => {
+        log::info!(
+            "Chat ID: {} triggered endpoint: {}",
+            $chat_id,
+            $fn_name
+        );
+        let extra_info = vec![
+            $( format!("{}: {:?}", $name, $value) ),*
+        ].join(", ");
+        log::debug!(
+            "Endpoint: {}, {}, {}: {:?}",
+            $fn_name,
+            extra_info,
+            $endpoint_type,
+            $data_debug
+        );
+    };
+}
+

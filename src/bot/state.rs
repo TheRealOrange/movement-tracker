@@ -1,23 +1,22 @@
 use sqlx::PgPool;
-use teloxide::{dispatching::dialogue::InMemStorage, prelude::*, RequestError};
+use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 use teloxide::dispatching::{dialogue, UpdateHandler};
+use teloxide::dispatching::dialogue::GetChatId;
 use teloxide::dptree::{case, endpoint};
-use teloxide::payloads::SendMessage;
-use teloxide::requests::JsonRequest;
-use teloxide::types::{MessageId, User};
+use teloxide::types::ReplyParameters;
+use crate::bot::apply::{apply_edit_admin, apply_edit_name, apply_edit_ops_name, apply_edit_prompt, apply_edit_role, apply_edit_type, apply_view, approve};
 use super::{send_msg, HandlerResult, MyDialogue};
 use super::commands::{cancel, Commands, help, PrivilegedCommands};
 
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::user;
-use crate::controllers;
-use crate::types::{RoleType, Usr, UsrType};
+use crate::{controllers, log_endpoint_hit};
+use crate::types::{Apply, RoleType, Usr, UsrType};
 
 #[derive(Clone, Default)]
 pub(super) enum State {
     #[default]
     Start,
-    Register,
     RegisterRole,
     RegisterType {
         role_type: RoleType,
@@ -36,6 +35,35 @@ pub(super) enum State {
         user_type: UsrType,
         name: String,
         ops_name: String,
+    },
+    ApplyView {
+        applications: Vec<Apply>,
+        prefix: String,
+        start: usize
+    },
+    ApplyEditPrompt {
+        application: Apply,
+        admin: bool
+    },
+    ApplyEditName {
+        application: Apply,
+        admin: bool
+    },
+    ApplyEditOpsName {
+        application: Apply,
+        admin: bool
+    },
+    ApplyEditRole {
+        application: Apply,
+        admin: bool
+    },
+    ApplyEditType {
+        application: Apply,
+        admin: bool
+    },
+    ApplyEditAdmin {
+        application: Apply,
+        admin: bool
     },
     Movement,
     EditMovement,
@@ -72,21 +100,32 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
     let admin_command_handler = teloxide::filter_command::<PrivilegedCommands, _>()
         .branch(
             case![State::Start]
-                .branch(case![PrivilegedCommands::User].endpoint(user)),
+                .branch(case![PrivilegedCommands::User].endpoint(user))
+                .branch(case![PrivilegedCommands::Approve].endpoint(approve)),
         );
 
     let message_handler = Update::filter_message()
         .branch(case![State::ErrorState].endpoint(error_state))
         .branch(command_handler)
         .branch(dptree::filter_async(check_admin)
-            .branch(admin_command_handler))
+            .branch(admin_command_handler)
+            .branch(case![State::ApplyEditName { application, admin }].endpoint(apply_edit_name))
+            .branch(case![State::ApplyEditOpsName { application, admin }].endpoint(apply_edit_ops_name))
+        )
         .branch(case![State::RegisterName { role_type, user_type }].endpoint(register_name))
-        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name))
-        .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete));
+        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name));
 
     let callback_query_handler = Update::filter_callback_query()
         .branch(case![State::RegisterRole].endpoint(register_role))
-        .branch(case![State::RegisterType { role_type }].endpoint(register_type));
+        .branch(case![State::RegisterType { role_type }].endpoint(register_type))
+        .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete))
+        .branch(dptree::filter_async(check_admin_callback)
+            .branch(case![State::ApplyView { applications, prefix, start }].endpoint(apply_view))
+            .branch(case![State::ApplyEditPrompt { application, admin }].endpoint(apply_edit_prompt))
+            .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
+            .branch(case![State::ApplyEditType { application, admin }].endpoint(apply_edit_type))
+            .branch(case![State::ApplyEditAdmin { application, admin }].endpoint(apply_edit_admin))
+        );
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
@@ -98,7 +137,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
 async fn reply_server_overloaded(bot: &Bot, msg: &Message) {
     send_msg(
         bot.send_message(msg.chat.id, "Server is overloaded. Please try again later.")
-        .reply_to_message_id(msg.id),
+            .reply_parameters(ReplyParameters::new(msg.id)),
         match msg.from() {
             Some(from) => &(from.username),
             _ => &None
@@ -118,7 +157,7 @@ async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
     let handle_error = || async {
         send_msg(
             bot.send_message(msg.chat.id, "Error occurred accessing the database")
-                .reply_to_message_id(msg.id),
+                .reply_parameters(ReplyParameters::new(msg.id)),
             &(user.username)
         ).await;
         false
@@ -140,24 +179,46 @@ async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
     }
 }
 
-async fn error_state(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn check_admin_callback(bot: Bot, dialogue: MyDialogue, q: CallbackQuery, pool: PgPool) -> bool {
+    // Helper function to log and return false on any errors
+    let handle_error = || async {
+        send_msg(
+            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
+            &q.from.username
+        ).await;
+        false
+    };
+
+    // Check if the telegram ID exists in the database
+    match controllers::user::user_exists_tele_id(&pool, q.from.id.0).await{
+        Ok(true) => {
+            // Check if the user is an admin
+            match controllers::user::get_user_by_tele_id(&pool, q.from.id.0).await {
+                Ok(retrieved_usr) => {
+                    retrieved_usr.admin
+                }
+                Err(_) => handle_error().await,
+            }
+        },
+        Ok(false) => false,
+        Err(_) => handle_error().await
+    }
+}
+
+async fn error_state(bot: Bot, dialogue: MyDialogue) -> HandlerResult {
     log::info!("Reached error state");
+    log_endpoint_hit!(dialogue.chat_id(), "error_state");
     send_msg(
-        bot.send_message(msg.chat.id, "Error occurred, returning to start!")
-            .reply_to_message_id(msg.id),
+        bot.send_message(dialogue.chat_id(), "Error occurred, returning to start!"),
         &None
     ).await;
     dialogue.update(State::Start).await?;
     Ok(())
 }
 
-async fn invalid_state(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
+async fn invalid_state(dialogue: MyDialogue) -> HandlerResult {
     log::info!("Reached an invalid state! (how did you do this?)");
-    send_msg(
-        bot.send_message(msg.chat.id, "Error occurred, returning to start!")
-            .reply_to_message_id(msg.id),
-        &None
-    ).await;
+    log_endpoint_hit!(dialogue.chat_id(), "invalid_state");
     dialogue.update(State::Start).await?;
     Ok(())
 }

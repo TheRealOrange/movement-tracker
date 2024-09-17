@@ -6,9 +6,9 @@ use teloxide::prelude::Message;
 use teloxide::dispatching::dialogue::{GetChatId, InMemStorageError};
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
 use crate::bot::state::State;
-use crate::controllers;
+use crate::{controllers, log_endpoint_hit};
 use crate::types::{RoleType, UsrType};
 use super::{send_msg, HandlerResult, MyDialogue};
 
@@ -60,7 +60,7 @@ async fn display_register_confirmation(bot: &Bot, chat_id: ChatId, username: &Op
 }
 
 pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {
-    log::debug!("Endpoint: register, Message: {:?}", msg);
+    log_endpoint_hit!(dialogue.chat_id(), "register", "Command", msg);
     // Early return if the message has no sender (msg.from() is None)
     let user = if let Some(user) = msg.from() {
         user
@@ -74,8 +74,8 @@ pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
     let handle_error = || async {
         send_msg(
             bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_to_message_id(msg.id),
-            &(user.username)
+                .reply_parameters(ReplyParameters::new(msg.id)),
+            &user.username
         ).await;
     };
 
@@ -84,13 +84,13 @@ pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
         Ok(true) => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "You have already registered")
-                    .reply_to_message_id(msg.id),
-                &(user.username),
+                    .reply_parameters(ReplyParameters::new(msg.id)),
+                &user.username,
             ).await;
             dialogue.update(State::Start).await?;
         },
         Ok(false) => {
-            display_role_types(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_role_types(&bot, dialogue.chat_id(), &user.username).await;
             log::debug!("Transitioning to RegisterRole");
             dialogue.update(State::RegisterRole).await?;
         },
@@ -108,16 +108,16 @@ pub(super) async fn register_role(
     dialogue: MyDialogue,
     q: CallbackQuery,
 ) -> HandlerResult {
-    log::debug!("Endpoint: register_role, Callback: {:?}", q);
+    log_endpoint_hit!(dialogue.chat_id(), "register_role", "Callback", q);
 
     match q.data {
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &(q.from.username),
+                &q.from.username,
             ).await;
 
-            display_role_types(&bot, dialogue.chat_id(), &(q.from.username)).await;
+            display_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(role) => {
             log::debug!("Received input: {:?}", &role);
@@ -126,20 +126,20 @@ pub(super) async fn register_role(
                     log::debug!("Selected role: {:?}", role_enum);
                     send_msg(
                         bot.send_message(dialogue.chat_id(), format!("Selected role: {}", role_enum.as_ref())),
-                        &(q.from.username),
+                        &q.from.username,
                     ).await;
 
-                    display_user_types(&bot, dialogue.chat_id(), &(q.from.username)).await;
+                    display_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
                     log::debug!("Transitioning to RegisterType with RoleType: {:?}", role_enum);
                     dialogue.update(State::RegisterType { role_type: role_enum }).await?;
                 }
                 Err(e) => {
                     log::error!("Invalid role type received: {}", e);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
-                        &(q.from.username),
+                        bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
+                        &q.from.username,
                     ).await;
-                    display_role_types(&bot, dialogue.chat_id(), &(q.from.username)).await;
+                    display_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }
@@ -154,17 +154,19 @@ pub(super) async fn register_type(
     role_type: RoleType,
     q: CallbackQuery,
 ) -> HandlerResult {
-    log::debug!("Endpoint: register_type, Callback: {:?}", q);
-    log::debug!("Role Type: {:?}", role_type);
+    log_endpoint_hit!(
+        dialogue.chat_id(), "register_type", "Callback", q, 
+        "RoleType" => role_type
+    );
 
     match q.data {
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &(q.from.username),
+                &q.from.username,
             ).await;
 
-            display_user_types(&bot, dialogue.chat_id(), &(q.from.username)).await;
+            display_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(usrtype) => {
             log::debug!("Received input: {:?}", &usrtype);
@@ -173,9 +175,9 @@ pub(super) async fn register_type(
                     log::debug!("Selected user type: {:?}", user_type_enum);
                     send_msg(
                         bot.send_message(dialogue.chat_id(), format!("Selected user type: {}", user_type_enum.as_ref())),
-                        &(q.from.username),
+                        &q.from.username,
                     ).await;
-                    display_register_name(&bot, dialogue.chat_id(), &(q.from.username)).await;
+                    display_register_name(&bot, dialogue.chat_id(), &q.from.username).await;
                     log::debug!("Transitioning to RegisterName with RoleType: {:?}, UsrType: {:?}", role_type, user_type_enum);
                     dialogue.update(State::RegisterName { role_type, user_type: user_type_enum }).await?;
                 }
@@ -183,9 +185,9 @@ pub(super) async fn register_type(
                     log::error!("Invalid user type received: {}", e);
                     send_msg(
                         bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
-                        &(q.from.username),
+                        &q.from.username,
                     ).await;
-                    display_user_types(&bot, dialogue.chat_id(), &(q.from.username)).await;
+                    display_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }
@@ -200,8 +202,11 @@ pub(super) async fn register_name(
     msg: Message,
     (role_type, user_type): (RoleType, UsrType),
 ) -> HandlerResult {
-    log::debug!("Endpoint: register_name, Message: {:?}", msg);
-    log::debug!("Role Type: {:?}, User Type: {:?}", role_type, user_type);
+    log_endpoint_hit!(
+        dialogue.chat_id(), "register_name", "Message", msg, 
+        "RoleType" => role_type,
+        "UserType" => user_type
+    );
     
     // Early return if the message has no sender (msg.from() is None)
     let user = if let Some(user) = msg.from() {
@@ -214,7 +219,8 @@ pub(super) async fn register_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_name) => {
-            display_register_ops_name(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_register_ops_name(&bot, dialogue.chat_id(), &user.username).await;
+            log::debug!("Transitioning to RegisterOpsName with RoleType: {:?}, UsrType: {:?}, Name: {:?}", role_type, user_type, input_name);
             dialogue.update(State::RegisterOpsName {
                 role_type,
                 user_type,
@@ -224,9 +230,9 @@ pub(super) async fn register_name(
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Please, send me your full name, or type /cancel to abort."),
-                &(user.username),
+                &user.username,
             ).await;
-            display_register_name(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_register_name(&bot, dialogue.chat_id(), &user.username).await;
         }
     }
     
@@ -239,8 +245,12 @@ pub(super) async fn register_ops_name(
     msg: Message,
     (role_type, user_type, name): (RoleType, UsrType, String),
 ) -> HandlerResult {
-    log::debug!("Endpoint: register_ops_name, Message: {:?}", msg);
-    log::debug!("Role Type: {:?}, User Type: {:?}, Name: {:?}", role_type, user_type, name);
+    log_endpoint_hit!(
+        dialogue.chat_id(), "register_ops_name", "Message", msg, 
+        "RoleType" => role_type,
+        "UserType" => user_type,
+        "Name" => name
+    );
     
     // Early return if the message has no sender (msg.from() is None)
     let user = if let Some(user) = msg.from() {
@@ -249,15 +259,6 @@ pub(super) async fn register_ops_name(
         log::error!("Cannot get user from message");
         dialogue.update(State::Start).await?;
         return Ok(());
-    };
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_to_message_id(msg.id),
-            &(user.username)
-        ).await;
     };
 
     match msg.text().map(ToOwned::to_owned) {
@@ -273,9 +274,9 @@ pub(super) async fn register_ops_name(
                         user_type.as_ref()
                     )
                 ),
-                &(user.username),
+                &user.username,
             ).await;
-            display_register_confirmation(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_register_confirmation(&bot, dialogue.chat_id(), &user.username).await;
             dialogue.update(State::RegisterComplete {
                 role_type,
                 user_type,
@@ -286,9 +287,9 @@ pub(super) async fn register_ops_name(
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Please, send me your OPS NAME, or type /cancel to abort."),
-                &(user.username),
+                &user.username,
             ).await;
-            display_register_name(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_register_name(&bot, dialogue.chat_id(), &user.username).await;
         }
     }
 
@@ -298,27 +299,23 @@ pub(super) async fn register_ops_name(
 pub(super) async fn register_complete(
     bot: Bot,
     dialogue: MyDialogue,
-    msg: Message,
     (role_type, user_type, name, ops_name): (RoleType, UsrType, String, String),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
-    log::debug!("Endpoint: register_complete, Message: {:?}", msg);
-    // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
-        user
-    } else {
-        log::error!("Cannot get user from message");
-        dialogue.update(State::ErrorState).await?;
-        return Ok(());
-    };
+    log_endpoint_hit!(
+        dialogue.chat_id(), "register_complete", "Callback", q, 
+        "RoleType" => role_type,
+        "UserType" => user_type,
+        "Name" => name,
+        "Ops Name" => ops_name
+    );
 
     // Helper function to log and return false on any errors
     let handle_error = || async {
         send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_to_message_id(msg.id),
-            &(user.username)
+            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
+            &q.from.username
         ).await;
     };
 
@@ -326,17 +323,18 @@ pub(super) async fn register_complete(
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &(q.from.username),
+                &q.from.username,
             ).await;
 
-            display_register_confirmation(&bot, dialogue.chat_id(), &(user.username)).await;
+            display_register_confirmation(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(confirmation) => {
-            if (confirmation == "YES") {
+            if confirmation == "YES" {
                 // Add new user to the database
                 match controllers::apply::apply_user(
                     &pool,
-                    user.id.0,
+                    q.from.id.0,
+                    q.from.full_name(),
                     name,
                     ops_name,
                     role_type,
@@ -346,15 +344,14 @@ pub(super) async fn register_complete(
                     Ok(true) => {
                         send_msg(
                             bot.send_message(dialogue.chat_id(), "Registered successfully, please wait for approval."),
-                            &(q.from.username),
+                            &q.from.username,
                         ).await;
                         dialogue.update(State::Start).await?;
                     },
                     Ok(false) => {
                         send_msg(
-                            bot.send_message(dialogue.chat_id(), "You have already applied, please wait for approval")
-                                .reply_to_message_id(msg.id),
-                            &(user.username),
+                            bot.send_message(dialogue.chat_id(), "You have already applied, please wait for approval"),
+                            &q.from.username,
                         ).await;
                         dialogue.update(State::Start).await?
                     },
@@ -366,7 +363,7 @@ pub(super) async fn register_complete(
             } else {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Cancelled registration."),
-                    &(q.from.username),
+                    &q.from.username,
                 ).await;
                 dialogue.update(State::Start).await?
             }
