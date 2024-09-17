@@ -1,3 +1,4 @@
+use chrono::NaiveDate;
 use sqlx::PgPool;
 use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
 use teloxide::dispatching::{dialogue, UpdateHandler};
@@ -11,7 +12,8 @@ use super::commands::{cancel, Commands, help, PrivilegedCommands};
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::user;
 use crate::{controllers, log_endpoint_hit};
-use crate::types::{Apply, RoleType, Usr, UsrType};
+use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
+use crate::types::{Apply, Availability, Ict, RoleType, Usr, UsrType};
 
 #[derive(Clone, Default)]
 pub(super) enum State {
@@ -65,17 +67,47 @@ pub(super) enum State {
         application: Apply,
         admin: bool
     },
-    Movement,
+    MovementView,
     EditMovement,
     AddMovement,
     AddMovementDetails {
         details: String,
     },
-    Availability,
-    EditAvailability,
-    AddAvailability,
-    AddAvailabilityDetails {
-        details: String,
+    AvailabilityView {
+        availability_list: Vec<Availability>
+    },
+    AvailabilitySelect {
+        availability_list: Vec<Availability>,
+        action: String,
+        prefix: String,
+        start: usize
+    },
+    AvailabilityModify {
+        availability_entry: Availability,
+        availability_list: Vec<Availability>,
+        action: String,
+        prefix: String,
+        start: usize
+    },
+    AvailabilityModifyType {
+        availability_entry: Availability,
+        action: String,
+        start: usize
+    },
+    AvailabilityModifyRemarks {
+        availability_entry: Availability,
+        action: String,
+        start: usize
+    },
+    AvailabilityAdd {
+        avail_type: Ict
+    },
+    AvailabilityAddChangeType {
+        avail_type: Ict
+    },
+    AvailabilityAddRemarks {
+        avail_type: Ict,
+        avail_dates: Vec<NaiveDate>
     },
     User,
     UserSelect,
@@ -93,7 +125,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(
             case![State::Start]
                 .branch(case![Commands::Help].endpoint(help))
-                .branch(case![Commands::Register].endpoint(register)),
+                .branch(case![Commands::Register].endpoint(register))
+                .branch(dptree::filter_async(check_registered)
+                    .branch(case![Commands::Availability].endpoint(availability))
+                ),
         )
         .branch(case![Commands::Cancel].endpoint(cancel));
 
@@ -107,13 +142,20 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
     let message_handler = Update::filter_message()
         .branch(case![State::ErrorState].endpoint(error_state))
         .branch(command_handler)
-        .branch(dptree::filter_async(check_admin)
-            .branch(admin_command_handler)
-            .branch(case![State::ApplyEditName { application, admin }].endpoint(apply_edit_name))
-            .branch(case![State::ApplyEditOpsName { application, admin }].endpoint(apply_edit_ops_name))
-        )
         .branch(case![State::RegisterName { role_type, user_type }].endpoint(register_name))
-        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name));
+        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name))
+        .branch(dptree::filter_async(check_registered)
+            .branch(dptree::filter_async(check_admin)
+                .branch(admin_command_handler)
+                .branch(case![State::ApplyEditName { application, admin }].endpoint(apply_edit_name))
+                .branch(case![State::ApplyEditOpsName { application, admin }].endpoint(apply_edit_ops_name))
+            )
+            .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
+            .branch(case![State::AvailabilityModifyRemarks { availability_entry, action, start }].endpoint(availability_modify_remarks))
+            .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_message))
+            .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_remarks))
+        );
+    
 
     let callback_query_handler = Update::filter_callback_query()
         .branch(case![State::RegisterRole].endpoint(register_role))
@@ -125,7 +167,14 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
             .branch(case![State::ApplyEditType { application, admin }].endpoint(apply_edit_type))
             .branch(case![State::ApplyEditAdmin { application, admin }].endpoint(apply_edit_admin))
-        );
+        )
+        .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
+        .branch(case![State::AvailabilitySelect { availability_list, action, prefix, start }].endpoint(availability_select))
+        .branch(case![State::AvailabilityModify { availability_entry, availability_list, action, prefix, start }].endpoint(availability_modify))
+        .branch(case![State::AvailabilityModifyType { availability_entry, action, start }].endpoint(availability_modify_type))
+        .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_callback))
+        .branch(case![State::AvailabilityAddChangeType { avail_type }].endpoint(availability_add_change_type))
+        .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_complete));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
@@ -138,16 +187,61 @@ async fn reply_server_overloaded(bot: &Bot, msg: &Message) {
     send_msg(
         bot.send_message(msg.chat.id, "Server is overloaded. Please try again later.")
             .reply_parameters(ReplyParameters::new(msg.id)),
-        match msg.from() {
-            Some(from) => &(from.username),
+        match msg.from {
+            Some(ref from) => &(from.username),
             _ => &None
         }
     ).await;
 }
 
+async fn check_registered(bot: Bot, msg: Message, pool: PgPool) -> bool {
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(ref user) = msg.from {
+        user
+    } else {
+        return false;
+    };
+
+    // Helper function to log and return false on any errors
+    let handle_error = || async {
+        send_msg(
+            bot.send_message(msg.chat.id, "Error occurred accessing the database")
+                .reply_parameters(ReplyParameters::new(msg.id)),
+            &(user.username)
+        ).await;
+        false
+    };
+
+    // Check if the telegram ID exists in the database
+    match controllers::user::user_exists_tele_id(&pool, user.id.0).await{
+        Ok(true) => true,
+        Ok(false) => {
+            // Check if the user is an admin
+            match controllers::apply::apply_exists_tele_id(&pool, user.id.0).await {
+                Ok(exists) => {
+                    if exists == true {
+                        send_msg(
+                            bot.send_message(msg.chat.id, "You have a pending registration. Please wait for it to be approved."),
+                            &(user.username)
+                        ).await;
+                    } else {
+                        send_msg(
+                            bot.send_message(msg.chat.id, "Please submit a registration with the bot using /register and wait for approval"),
+                            &(user.username)
+                        ).await;
+                    }
+                    false
+                }
+                Err(_) => handle_error().await,
+            }
+        },
+        Err(_) => handle_error().await
+    }
+}
+
 async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(user) = msg.from {
         user
     } else {
         return false;

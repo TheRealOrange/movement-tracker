@@ -1,6 +1,6 @@
 use sqlx::{query_as, PgPool};
 use sqlx::types::Uuid;
-use crate::types::{Apply, RoleType, UsrType};
+use crate::types::{Apply, RoleType, Usr, UsrType};
 
 pub(crate) async fn apply_user(
     conn: &PgPool,
@@ -46,7 +46,6 @@ pub(crate) async fn apply_user(
 
 // Function to fetch all apply requests
 pub async fn get_all_apply_requests(pool: &PgPool) -> Result<Vec<Apply>, sqlx::Error> {
-    // Query to select all rows from the apply table
     let result = sqlx::query_as!(
         Apply,
         r#"
@@ -61,6 +60,7 @@ pub async fn get_all_apply_requests(pool: &PgPool) -> Result<Vec<Apply>, sqlx::E
             apply.created AS created,
             apply.updated AS updated
         FROM apply
+        WHERE apply.is_valid = TRUE;  -- Fetch only valid apply requests
         "#
     )
         .fetch_all(pool)
@@ -68,14 +68,12 @@ pub async fn get_all_apply_requests(pool: &PgPool) -> Result<Vec<Apply>, sqlx::E
 
     match result {
         Ok(query_result) => {
-            // Log a message when successful
-            log::info!("Successfully fetched {} apply requests", query_result.len());
+            log::info!("Successfully fetched {} valid apply requests", query_result.len());
             Ok(query_result)
         }
         Err(e) => {
-            // Log the error and return it
-            log::error!("Failed to fetch apply requests: {:?}", e);
-            Err(e)  // Return the SQL error
+            log::error!("Failed to fetch valid apply requests: {:?}", e);
+            Err(e)
         }
     }
 }
@@ -96,7 +94,7 @@ pub(crate) async fn get_apply_by_uuid(conn: &PgPool, id: Uuid) -> Result<Apply, 
             created,
             updated
         FROM apply
-        WHERE id = $1;
+        WHERE id = $1 AND is_valid = TRUE;  -- Only fetch valid apply requests
         "#,
         id
     )
@@ -105,11 +103,11 @@ pub(crate) async fn get_apply_by_uuid(conn: &PgPool, id: Uuid) -> Result<Apply, 
 
     match result {
         Ok(apply) => {
-            log::info!("Found apply request with id: {}", id);
+            log::info!("Found valid apply request with id: {}", id);
             Ok(apply)
         }
         Err(e) => {
-            log::error!("Error fetching apply request by id: {}", e);
+            log::error!("Error fetching valid apply request by id: {}", e);
             Err(e)
         }
     }
@@ -119,8 +117,9 @@ pub(crate) async fn get_apply_by_uuid(conn: &PgPool, id: Uuid) -> Result<Apply, 
 pub(crate) async fn remove_apply_by_uuid(conn: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
-        DELETE FROM apply
-        WHERE id = $1;
+        UPDATE apply
+        SET is_valid = FALSE  -- Soft delete by marking as invalid
+        WHERE id = $1 AND is_valid = TRUE;  -- Only update if the record is valid
         "#,
         id
     )
@@ -130,16 +129,84 @@ pub(crate) async fn remove_apply_by_uuid(conn: &PgPool, id: Uuid) -> Result<bool
     match result {
         Ok(query_result) => {
             if query_result.rows_affected() == 1 {
-                log::info!("Successfully deleted apply request with id: {}", id);
-                Ok(true)  // Deletion was successful
+                log::info!("Successfully soft-deleted apply request with id: {}", id);
+                Ok(true)
             } else {
-                log::warn!("No apply request found with id: {}", id);
-                Ok(false)  // No row was deleted, indicating the UUID was not found
+                log::warn!("No valid apply request found with id: {}", id);
+                Ok(false)
             }
         }
         Err(e) => {
-            log::error!("Error deleting apply request by id: {}", e);
-            Err(e)  // Return the SQL error
+            log::error!("Error soft-deleting apply request by id: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn apply_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM apply
+            WHERE apply.tele_id = $1
+            AND apply.is_valid = TRUE  -- Only check valid apply requests
+        ) AS "exists!";
+        "#,
+        tele_id as i64
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            let exists = res.exists;
+            if exists {
+                log::info!("Valid apply request for tele_id: {} exists", tele_id);
+            } else {
+                log::info!("No valid apply request for tele_id: {} exists", tele_id);
+            }
+            Ok(exists)
+        }
+        Err(e) => {
+            log::error!("Error checking if valid apply request exists for tele_id: {}: {}", tele_id, e);
+            Err(e)
+        }
+    }
+}
+
+
+pub(crate) async fn get_apply_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<Apply, sqlx::Error> {
+    let result = sqlx::query_as!(
+        Apply,
+        r#"
+        SELECT
+            id,
+            tele_id,
+            chat_username,
+            name,
+            ops_name,
+            usr_type AS "usr_type: _",
+            role_type AS "role_type: _",
+            created,
+            updated
+        FROM apply
+        WHERE tele_id = $1
+        AND is_valid = TRUE;  -- Only fetch valid apply requests
+        "#,
+        tele_id as i64
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(apply) => {
+            log::info!("Successfully retrieved valid apply request with tele_id: {}", tele_id);
+            Ok(apply)
+        }
+        Err(e) => {
+            log::error!("Error fetching valid apply request by tele_id: {}: {}", tele_id, e);
+            Err(e)
         }
     }
 }

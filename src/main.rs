@@ -1,6 +1,7 @@
 mod bot;
 mod controllers;
 pub(crate) mod types;
+mod utils;
 
 use crate::controllers::db;
 use teloxide::prelude::*;

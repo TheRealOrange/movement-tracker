@@ -15,25 +15,28 @@ async fn set_attendance(
             UPDATE availability
             SET attended = $1
             FROM usrs
-            WHERE usr_id = usrs.id AND usrs.tele_id = $2
-            AND avail = $3
+            WHERE usr_id = usrs.id 
+            AND usrs.tele_id = $2
+            AND availability.avail = $3
+            AND availability.is_valid = TRUE  -- Only update valid entries
             RETURNING
-            avail,
-            ict_type,
-            remarks,
-            saf100,
-            attended,
-            availability.created,
-            availability.updated
-        ) SELECT
-        usrs.ops_name,
-        update_statement.avail,
-        update_statement.ict_type AS "ict_type: _",
-        update_statement.remarks,
-        update_statement.saf100,
-        update_statement.attended,
-        update_statement.created,
-        update_statement.updated
+                avail,
+                ict_type,
+                remarks,
+                saf100,
+                attended,
+                availability.created,
+                availability.updated
+        )
+        SELECT
+            usrs.ops_name,
+            update_statement.avail,
+            update_statement.ict_type AS "ict_type: _",
+            update_statement.remarks,
+            update_statement.saf100,
+            update_statement.attended,
+            update_statement.created,
+            update_statement.updated
         FROM usrs, update_statement
         WHERE usrs.tele_id = $2;
         "#,
@@ -41,18 +44,19 @@ async fn set_attendance(
         tele_id,
         date,
     )
-    .fetch_one(conn)
-    .await;
+        .fetch_one(conn)
+        .await;
 
     match result {
         Ok(res) => {
-            log::info!("Attendance ({}) for ({}) on: ({})", res.attended, res.ops_name, date);
-
+            log::info!(
+                "Attendance status ({}) updated for user ({}) on: ({})",
+                res.attended, res.ops_name, date
+            );
             Ok(res)
         }
         Err(e) => {
             log::error!("Error updating user attendance: {}", e);
-
             Err(e)
         }
     }

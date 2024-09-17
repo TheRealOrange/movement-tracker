@@ -5,7 +5,7 @@ use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
 use strum_macros::{AsRefStr, EnumIter, EnumString};
 use sqlx::types::Uuid;
 
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
+#[derive(Clone, Debug, sqlx::Type, Eq, PartialEq, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "user_type_enum", rename_all = "lowercase")]
 #[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum UsrType {
@@ -14,7 +14,7 @@ pub(crate) enum UsrType {
     NS,
 }
 
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
+#[derive(Clone, Debug, sqlx::Type, Eq, PartialEq, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "role_type_enum", rename_all = "lowercase")]
 #[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum RoleType {
@@ -22,7 +22,7 @@ pub(crate) enum RoleType {
     ARO
 }
 
-#[derive(Clone, Debug, sqlx::Type, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
+#[derive(Clone, Debug, sqlx::Type, Eq, PartialEq, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "ict_enum", rename_all = "lowercase")]
 #[strum(serialize_all = "UPPERCASE")]
 pub(crate) enum Ict {

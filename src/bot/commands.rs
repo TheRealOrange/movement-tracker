@@ -14,6 +14,10 @@ pub(super) enum Commands {
     Help,
     #[command(description = "Register to use this bot")]
     Register,
+    #[command(description = "Indicate your availability (for SANS)")]
+    Availability,
+    #[command(description = "Add information about your movement")]
+    Movement,
     #[command(description = "Cancel current action")]
     Cancel,
 }

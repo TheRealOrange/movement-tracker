@@ -7,13 +7,13 @@ pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<b
         r#"
         SELECT EXISTS(
             SELECT 1 FROM usrs
-            WHERE usrs.tele_id = $1
+            WHERE usrs.tele_id = $1 AND is_valid = TRUE
         ) AS "exists!";
         "#,
         tele_id as i64
     )
-    .fetch_one(conn)
-    .await;
+        .fetch_one(conn)
+        .await;
 
     match result {
         Ok(res) => {
@@ -40,7 +40,7 @@ async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> Result<bool, sql
         r#"
         SELECT EXISTS(
             SELECT 1 FROM usrs
-            WHERE usrs.ops_name = $1
+            WHERE usrs.ops_name = $1 AND is_valid = TRUE
         ) AS "exists!";
         "#,
         ops_name
@@ -83,7 +83,7 @@ pub(crate) async fn get_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<U
             usrs.created AS created,
             usrs.updated AS updated
         FROM usrs
-        WHERE usrs.tele_id = $1;
+        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE;
         "#,
         tele_id as i64
     )
@@ -119,7 +119,7 @@ async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> Result<Usr, sqlx
             usrs.created AS created,
             usrs.updated AS updated
         FROM usrs
-        WHERE usrs.ops_name = $1;
+        WHERE usrs.ops_name = $1 AND usrs.is_valid = TRUE;
         "#,
         ops_name
     )
@@ -182,6 +182,35 @@ pub(crate) async fn add_user(
         }
         Err(e) => {
             log::error!("Error adding user: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn remove_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE usrs
+        SET is_valid = FALSE, updated = NOW()
+        WHERE tele_id = $1 AND is_valid = TRUE;
+        "#,
+        tele_id as i64
+    )
+        .execute(conn)
+        .await;
+
+    match result {
+        Ok(query_result) => {
+            if query_result.rows_affected() == 1 {
+                log::info!("Soft deleted user with tele_id: {}", tele_id);
+                Ok(true)
+            } else {
+                log::warn!("No user found with tele_id: {}", tele_id);
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            log::error!("Error soft deleting user: {}", e);
             Err(e)
         }
     }

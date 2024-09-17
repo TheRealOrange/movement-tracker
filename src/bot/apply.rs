@@ -170,7 +170,7 @@ async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String
 pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {
     log_endpoint_hit!(dialogue.chat_id(), "approve", "Command", msg);
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
@@ -188,7 +188,8 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
     };
 
     // Retrieve all the pending applications
-    match controllers::apply::get_all_apply_requests(&pool).await {
+    match controllers::apply::get_all_apply_requests(&pool)
+        .await {
         Ok(applications) => {
             if applications.is_empty() {
                 send_msg(
@@ -285,6 +286,7 @@ pub(super) async fn apply_view(
                                 match controllers::apply::get_apply_by_uuid(&pool, parsed_id).await {
                                     Ok(application) => {
                                         display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, false).await;
+                                        log::debug!("Transitioning to ApplyEditPrompt with Application: {:?}, Admin: {:?}", application, false );
                                         dialogue.update(State::ApplyEditPrompt { application, admin: false }).await?;
                                     }
                                     Err(_) => {
@@ -425,7 +427,7 @@ pub(super) async fn apply_edit_name(
     );
 
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
@@ -464,7 +466,7 @@ pub(super) async fn apply_edit_ops_name(
     );
 
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
@@ -528,7 +530,7 @@ pub(super) async fn apply_edit_role(
                 Err(e) => {
                     log::error!("Invalid role type received: {}", e);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
+                        bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                         &q.from.username,
                     ).await;
                     display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;

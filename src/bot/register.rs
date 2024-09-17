@@ -17,7 +17,7 @@ async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String
         .map(|role| InlineKeyboardButton::callback(role.as_ref(), role.as_ref()));
 
     send_msg(
-        bot.send_message(chat_id, "I am a:")
+        bot.send_message(chat_id, "Please select your role:")
             .reply_markup(InlineKeyboardMarkup::new([roles])),
         username
     ).await;
@@ -28,7 +28,7 @@ async fn display_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String
         .map(|usrtype| InlineKeyboardButton::callback(usrtype.as_ref(), usrtype.as_ref()));
 
     send_msg(
-        bot.send_message(chat_id, "I am a:")
+        bot.send_message(chat_id, "Please select your status:")
             .reply_markup(InlineKeyboardMarkup::new([usrtypes])),
        username
     ).await;
@@ -62,7 +62,7 @@ async fn display_register_confirmation(bot: &Bot, chat_id: ChatId, username: &Op
 pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {
     log_endpoint_hit!(dialogue.chat_id(), "register", "Command", msg);
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
@@ -184,7 +184,7 @@ pub(super) async fn register_type(
                 Err(e) => {
                     log::error!("Invalid user type received: {}", e);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
+                        bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                         &q.from.username,
                     ).await;
                     display_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
@@ -209,7 +209,7 @@ pub(super) async fn register_name(
     );
     
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
@@ -253,7 +253,7 @@ pub(super) async fn register_ops_name(
     );
     
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");
