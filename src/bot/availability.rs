@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::cmp::{max, min};
 use std::str::FromStr;
+use chrono::NaiveDateTime;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::{Error, PgPool};
@@ -21,12 +22,14 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     options.push(vec![InlineKeyboardButton::callback("ADD", "ADD")]);
     
-    let control_options: Vec<InlineKeyboardButton> = ["MODIFY", "DELETE"]
+    let control_options: Vec<InlineKeyboardButton> = ["ADD", "MODIFY", "DELETE"]
         .into_iter()
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
     
-    options.push(control_options);
+    if (existing.len() > 0) {
+        options.push(control_options);
+    }
     options.push(vec![InlineKeyboardButton::callback("DONE", "DONE")]);
 
     let mut output_text = String::new();
@@ -47,10 +50,16 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
 
             // Format date as "MMM-DD" (3-letter month)
             let formatted_date = availability.avail.format("%b-%d").to_string();
+            
+            let state = if availability.is_valid == false && availability.planned == true {
+                " (UNAVAIL, PLANNED) "
+            } else {
+                ""
+            };
 
             output_text.push_str(&format!(
-                "- {}: {}{}\n",
-                formatted_date, availability.ict_type.as_ref(), truncated_remarks
+                "- {}: {}{}{}\n",
+                formatted_date, availability.ict_type.as_ref(), state, truncated_remarks
             ));
         }
     }
@@ -85,10 +94,23 @@ async fn display_availability_edit(
     };
 
     let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries.into_iter()
-        .map(|entry| {
+        .filter_map(|entry| {
+            let truncated_remarks = if let Some(remarks) = &entry.remarks {
+                if remarks.len() > 8 {
+                    format!(", {}...", &remarks[0..8])
+                } else {
+                    format!(", {}", &remarks)
+                }
+            } else {
+                "".to_string()
+            };
             // Format date as "MMM-DD" (3-letter month)
-            let formatted = format!("{}: {}", entry.avail.format("%b-%d").to_string(), entry.ict_type.as_ref());
-            vec![InlineKeyboardButton::callback(formatted, prefix.to_owned() + &entry.id.to_string())]
+            let formatted = format!("{}: {}{}", entry.avail.format("%b-%d").to_string(), entry.ict_type.as_ref(), truncated_remarks);
+            if entry.is_valid {
+                Some(vec![InlineKeyboardButton::callback(formatted, prefix.to_owned() + &entry.id.to_string())])
+            } else {
+                None
+            }
         })
         .collect();
 
@@ -325,7 +347,7 @@ async fn modify_availability_and_go_back(
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
         Ok(user) => {
             if user.id == availability_entry.user_id {
-                match controllers::scheduling::edit_avail_by_uuid(&pool, availability_entry.id, ict_type_edit, remark_edit).await {
+                match controllers::scheduling::edit_avail_by_uuid(&pool, availability_entry.id, None, ict_type_edit, remark_edit).await {
                     Ok(updated) => {
                         send_msg(
                             bot.send_message(dialogue.chat_id(), format!(
@@ -351,6 +373,41 @@ async fn modify_availability_and_go_back(
     }
     
     Ok(())
+}
+
+async fn register_availability(
+    bot: &Bot, 
+    dialogue: &MyDialogue, 
+    username: &Option<String>,
+    tele_id: u64,
+    avail_dates: &Vec<NaiveDate>,
+    avail_type: &Ict,
+    remarks: Option<String>,
+    pool: &PgPool
+) {
+    // Add the availability to the database for each date
+    let mut added: Vec<AvailabilityDetails> = Vec::new();
+    for date in avail_dates.iter() {
+        match controllers::scheduling::add_user_avail(pool, tele_id, *date, avail_type, remarks.clone(), None).await {
+            Ok(details) => {
+                added.push(details);
+            }
+            Err(_) => {}
+        }
+    }
+
+    if added.is_empty() {
+        send_msg(
+            bot.send_message(dialogue.chat_id(), "Error, added no dates."),
+            username,
+        ).await;
+    } else {
+        let added_dates = added.into_iter().map(|availability| availability.avail).collect();
+        send_msg(
+            bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
+            username,
+        ).await;
+    }
 }
 
 pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {
@@ -425,9 +482,9 @@ pub(super) async fn availability_view(
             } else if option == "MODIFY" || option == "DELETE" {
                 let action = option.clone();
                 handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action).await?;
-            } else if option == "CANCEL" {
+            } else if option == "DONE" {
                 send_msg(
-                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
+                    bot.send_message(dialogue.chat_id(), "Returned to start."),
                     &q.from.username,
                 ).await;
                 dialogue.update(State::Start).await?
@@ -591,29 +648,7 @@ pub(super) async fn availability_add_remarks(
     match msg.text().map(ToOwned::to_owned) {
         Some(input_remarks) => {
             // add availability to database with the specified remarks
-            // Add the availability to the database for each date
-            let mut added: Vec<AvailabilityDetails> = Vec::new();
-            for date in avail_dates.iter() {
-                match controllers::scheduling::add_user_avail(&pool, user.id.0, *date, &avail_type, Some(input_remarks.clone())).await {
-                    Ok(details) => {
-                        added.push(details);
-                    }
-                    Err(_) => {}
-                }
-            }
-            
-            if added.is_empty() {
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Error, added no dates."),
-                    &user.username,
-                ).await;
-            } else {
-                let added_dates = added.into_iter().map(|availability| availability.avail).collect();
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
-                    &user.username,
-                ).await;   
-            }
+            register_availability(&bot, &dialogue, &user.username, user.id.0, &avail_dates, &avail_type, Some(input_remarks), &pool).await;
 
             dialogue.update(State::Start).await?;
         }
@@ -653,29 +688,7 @@ pub(super) async fn availability_add_complete(
         Some(option) => {
             if option == "DONE" {
                 // add availability to database with the specified remarks
-                // Add the availability to the database for each date
-                let mut added: Vec<AvailabilityDetails> = Vec::new();
-                for date in avail_dates.iter() {
-                    match controllers::scheduling::add_user_avail(&pool, q.from.id.0, *date, &avail_type, None).await {
-                        Ok(details) => {
-                            added.push(details);
-                        }
-                        Err(_) => {}
-                    }
-                }
-
-                if added.is_empty() {
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Error, added no dates."),
-                        &q.from.username,
-                    ).await;
-                } else {
-                    let added_dates = added.into_iter().map(|availability| availability.avail).collect();
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
-                        &q.from.username,
-                    ).await;
-                }
+                register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool).await;
                 
                 dialogue.update(State::Start).await?
             } else if option == "CANCEL" {
@@ -908,5 +921,5 @@ pub(super) async fn availability_modify_type(
         }
     }
     
-    todo!()
+    Ok(())
 }

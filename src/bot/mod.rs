@@ -15,7 +15,6 @@ pub(self) mod state;
 pub(self) mod register;
 pub(self) mod apply;
 pub(self) mod availability;
-mod notify;
 mod planning;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;

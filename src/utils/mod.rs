@@ -1,11 +1,11 @@
-use chrono::{NaiveDate, Datelike, Utc};
+use chrono::{NaiveDate, Datelike, Utc, Local};
 use regex::Regex;
 use std::collections::HashMap;
 
 pub(crate)
 fn parse_dates(input: &str) -> Vec<NaiveDate> {
     let mut dates = Vec::new();
-    let today = Utc::now().naive_utc().date();
+    let today = Local::now().naive_utc().date();
     let current_year = today.year();
 
     // Regex patterns for different date formats
@@ -124,4 +124,29 @@ pub(crate) fn format_dates_as_markdown(dates: &Vec<NaiveDate>) -> String {
     }
 
     markdown_list
+}
+
+pub(crate) fn add_month_safe(date: NaiveDate, months: u32) -> NaiveDate {
+    // Try to add month while considering the possibility of overflows (e.g., from January 31st to February)
+    let next_month = NaiveDate::from_ymd_opt(date.year() + ((date.month() - 1 + months)/12) as i32, (date.month()-1 + months) % 12 +1, date.day());
+
+    // Handle overflow by taking the last valid day of the next month if needed
+    next_month.unwrap_or_else(|| {
+        let last_day_of_next_month = NaiveDate::from_ymd_opt(date.year() + ((date.month() + months)/12) as i32, (date.month() + months) % 12 +1, 1).and_then(|d| d.pred_opt()).expect("Invalid date");
+        last_day_of_next_month
+    })
+}
+
+pub(crate) fn escape_special_characters(input: &str) -> String {
+    let special_characters = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
+
+    let mut escaped_string = input.to_string();
+
+    for &ch in &special_characters {
+        let ch_str = ch.to_string();
+        let escaped_ch = format!("\\{}", ch);
+        escaped_string = escaped_string.replace(&ch_str, &escaped_ch);
+    }
+
+    escaped_string
 }

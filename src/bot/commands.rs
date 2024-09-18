@@ -20,6 +20,8 @@ pub(super) enum Commands {
     Availability,
     #[command(description = "Add information about your movement")]
     Movement,
+    #[command(description = "View information about the future availability")]
+    Forecast,
     #[command(description = "Cancel current action")]
     Cancel,
 }
@@ -81,7 +83,7 @@ pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgP
         bot.send_message(msg.chat.id, help_str),
         &(user.username)
     ).await;
-    
+
     Ok(())
 }
 

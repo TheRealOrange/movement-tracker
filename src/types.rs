@@ -78,8 +78,10 @@ pub(crate) struct Availability {
     pub avail: NaiveDate,
     pub ict_type: Ict,
     pub remarks: Option<String>,
+    pub planned: bool,
     pub saf100: bool,
     pub attended: bool,
+    pub is_valid: bool,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
 }
@@ -87,11 +89,14 @@ pub(crate) struct Availability {
 #[derive(Clone, sqlx::FromRow, Debug)]
 pub(crate) struct AvailabilityDetails {
     pub ops_name: String,
+    pub usr_type: UsrType,
     pub avail: NaiveDate,
     pub ict_type: Ict,
     pub remarks: Option<String>,
+    pub planned: bool,
     pub saf100: bool,
     pub attended: bool,
+    pub is_valid: bool,
     pub created: DateTime<Utc>,
     pub updated: DateTime<Utc>,
 }

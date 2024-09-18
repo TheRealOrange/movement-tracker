@@ -13,7 +13,8 @@ use super::register::{register, register_complete, register_name, register_ops_n
 use super::user::user;
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
-use crate::types::{Apply, Availability, Ict, RoleType, Usr, UsrType};
+use crate::bot::planning::{forecast, forecast_view};
+use crate::types::{Apply, Availability, AvailabilityDetails, Ict, RoleType, Usr, UsrType};
 
 #[derive(Clone, Default)]
 pub(super) enum State {
@@ -114,6 +115,12 @@ pub(super) enum State {
         avail_dates: Vec<NaiveDate>
     },
     // TODO: States meant for viewing the forecast
+    ForecastView {
+        availability_list: Vec<AvailabilityDetails>,
+        role_type: RoleType, 
+        start: NaiveDate, 
+        end: NaiveDate
+    },
     // TODO: States meant for planning SANS for flight
     // TODO: States meant for SANS attendance confirmation
     // TODO: States meant for editing users
@@ -130,13 +137,11 @@ pub(super) enum State {
 
 pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Commands, _>()
-        .branch(
-            case![State::Start]
-                .branch(case![Commands::Help].endpoint(help))
-                .branch(case![Commands::Register].endpoint(register))
-                .branch(dptree::filter_async(check_registered)
-                    .branch(case![Commands::Availability].endpoint(availability))
-                ),
+        .branch(case![Commands::Help].endpoint(help))
+        .branch(case![Commands::Register].endpoint(register))
+        .branch(dptree::filter_async(check_registered)
+            .branch(case![Commands::Availability].endpoint(availability))
+            .branch(case![Commands::Forecast].endpoint(forecast))
         )
         .branch(case![Commands::Cancel].endpoint(cancel));
 
@@ -182,7 +187,8 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::AvailabilityModifyType { availability_entry, action, start }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_callback))
         .branch(case![State::AvailabilityAddChangeType { avail_type }].endpoint(availability_add_change_type))
-        .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_complete));
+        .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_complete))
+        .branch(case![State::ForecastView { availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)

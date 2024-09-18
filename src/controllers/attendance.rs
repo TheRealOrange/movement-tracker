@@ -23,18 +23,23 @@ async fn set_attendance(
                 avail,
                 ict_type,
                 remarks,
+                planned,
                 saf100,
                 attended,
+                availability.is_valid,
                 availability.created,
                 availability.updated
         )
         SELECT
             usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
             update_statement.avail,
             update_statement.ict_type AS "ict_type: _",
             update_statement.remarks,
+            update_statement.planned,
             update_statement.saf100,
             update_statement.attended,
+            update_statement.is_valid,
             update_statement.created,
             update_statement.updated
         FROM usrs, update_statement
