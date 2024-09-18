@@ -14,7 +14,9 @@ pub(self) mod user;
 pub(self) mod state;
 pub(self) mod register;
 pub(self) mod apply;
-mod availability;
+pub(self) mod availability;
+mod notify;
+mod planning;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;

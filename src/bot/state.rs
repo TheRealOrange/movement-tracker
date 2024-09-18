@@ -19,6 +19,7 @@ use crate::types::{Apply, Availability, Ict, RoleType, Usr, UsrType};
 pub(super) enum State {
     #[default]
     Start,
+    // States used for registering for an account
     RegisterRole,
     RegisterType {
         role_type: RoleType,
@@ -38,6 +39,7 @@ pub(super) enum State {
         name: String,
         ops_name: String,
     },
+    // States used for looking through and approving applications
     ApplyView {
         applications: Vec<Apply>,
         prefix: String,
@@ -67,12 +69,14 @@ pub(super) enum State {
         application: Apply,
         admin: bool
     },
+    // TODO: States used for adding personal movement details 
     MovementView,
     EditMovement,
     AddMovement,
     AddMovementDetails {
         details: String,
     },
+    // States used for adding and modifying availability for SANS
     AvailabilityView {
         availability_list: Vec<Availability>
     },
@@ -109,6 +113,10 @@ pub(super) enum State {
         avail_type: Ict,
         avail_dates: Vec<NaiveDate>
     },
+    // TODO: States meant for viewing the forecast
+    // TODO: States meant for planning SANS for flight
+    // TODO: States meant for SANS attendance confirmation
+    // TODO: States meant for editing users
     User,
     UserSelect,
     ChangeOpsName {
