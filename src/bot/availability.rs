@@ -10,7 +10,7 @@ use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
 
 async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();

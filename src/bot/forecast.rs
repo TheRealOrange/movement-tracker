@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 
 async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()

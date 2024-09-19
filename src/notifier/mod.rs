@@ -1,10 +1,7 @@
-use crate::controllers;
 use crate::types::{Availability, ScheduledNotifications, Usr};
-use chrono::Utc;
 use sqlx::PgPool;
 use std::time::Duration;
 use teloxide::prelude::*;
-use sqlx::Executor;
 
 pub(crate) async fn start_notifier(bot: Bot, conn: PgPool) {
     loop {

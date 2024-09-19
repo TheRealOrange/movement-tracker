@@ -10,7 +10,7 @@ use std::cmp::{max, min};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
 use uuid::Uuid;
 
 // Helper function to display a user's availability

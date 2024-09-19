@@ -7,6 +7,7 @@ use teloxide::payloads::SendMessage;
 use teloxide::prelude::*;
 use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
+use teloxide::types::MessageId;
 
 pub(self) mod commands;
 pub(self) mod user;
@@ -33,16 +34,17 @@ pub(crate) async fn init_bot(bot: Bot, pool: PgPool) {
         .await;
 }
 
-pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<String>) {
+pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<String>) -> Option<MessageId> {
     match msg
         .await {
-        Ok(_) => {}
+        Ok(msg) => { Some(msg.id) }
         Err(e) => {
             log::error!(
                 "Error replying to msg from user: {}, error: {}",
                 username.as_deref().unwrap_or("none"),
                 e
             );
+            None
         }
     }
 }
