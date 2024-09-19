@@ -15,9 +15,9 @@ use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::types::{Availability, AvailabilityDetails, RoleType, UsrType};
 
-async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
+async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
-        .filter_map(|role| if role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
+        .filter_map(|role| if *role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
         .collect();
 
     let mut view_range: Vec<Vec<InlineKeyboardButton>> = Vec::new();
@@ -43,8 +43,8 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
     let mut output_text = format!(
         "*Availability forecast for role:* __{}__ *from* __{}__ *to* __{}__\n\n",
         role_type.as_ref(),
-        start.format("%b\\-%d\\-%Y"),  // Formatting like "Sep 05"
-        end.format("%b\\-%d\\-%Y")     // Formatting like "Oct 10"
+        start.format("%b\\-%d\\-%Y"),
+        end.format("%b\\-%d\\-%Y")
     );
 
     // Organize availability by day
@@ -64,20 +64,18 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
             let planned_str = if availability.planned { " \\(PLANNED\\)" } else { "" };
             let avail = if !availability.is_valid { " *\\(UNAVAIL\\)*" } else { "" };
             let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
-            let saf100_str = if availability.saf100 { " SAF100 ISSUED" } else { "" };
+            let saf100_str = if availability.saf100 { " SAF100 ISSUED" } else { if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" } else { "" } };
 
-            // Truncate remarks to a max of 10 characters
+            // Truncate remarks to a max of 15 characters
             let remarks_str = if let Some(remarks) = &availability.remarks {
                 if remarks.len() > 15 {
-                    format!("{}: {}...", saf100_str, &remarks[0..15])
+                    format!("{}: {}\\.\\.\\.", saf100_str, utils::escape_special_characters(&remarks[0..15]))
                 } else {
-                    format!("{}: {}", saf100_str, remarks)
+                    format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
                 }
             } else {
                 saf100_str.to_string()
             };
-            
-            let escaped_remarks = utils::escape_special_characters(&remarks_str);
 
             output_text.push_str(&format!(
                 "\\- {} __{}__{}{}{}{}\n",
@@ -86,7 +84,7 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
                 planned_str,
                 avail,
                 usrtype_str,
-                escaped_remarks
+                remarks_str
             ));
         }
         output_text.push('\n'); // Add space between dates
@@ -121,7 +119,7 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
             let end = start.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, role_type.clone(), start, end).await {
                 Ok(availability_list) => {
-                    display_availability_forecast(&bot, dialogue.chat_id(), &user.username, role_type.clone(), &availability_list, start, end).await;
+                    display_availability_forecast(&bot, dialogue.chat_id(), &user.username, &role_type, &availability_list, start, end).await;
                     dialogue.update(State::ForecastView { availability_list, role_type, start, end }).await?;
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
@@ -148,7 +146,7 @@ pub(super) async fn forecast_view(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, role_type.clone(), &availability_list, start, end).await;
+            display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &role_type, &availability_list, start, end).await;
         }
         Some(option) => {
             let mut new_role = role_type.clone();
@@ -186,7 +184,7 @@ pub(super) async fn forecast_view(
                         new_role = input_role_enum;
                     }
                     Err(_) => {
-                        display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, role_type.clone(), &availability_list, start, end).await;
+                        display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &role_type, &availability_list, start, end).await;
                         return Ok(());
                     }
                 }
@@ -194,7 +192,7 @@ pub(super) async fn forecast_view(
 
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, new_role.clone(), new_start, new_end).await {
                 Ok(availability_list_new) => {
-                    display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, new_role.clone(), &availability_list_new, new_start, new_end).await;
+                    display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &new_role, &availability_list_new, new_start, new_end).await;
                     dialogue.update(State::ForecastView { availability_list: availability_list_new, role_type: new_role, start: new_start, end: new_end }).await?;
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await

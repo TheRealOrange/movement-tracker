@@ -20,6 +20,7 @@ async fn set_attendance(
             AND availability.avail = $3
             AND availability.is_valid = TRUE  -- Only update valid entries
             RETURNING
+                availability.id,
                 avail,
                 ict_type,
                 remarks,
@@ -31,6 +32,7 @@ async fn set_attendance(
                 availability.updated
         )
         SELECT
+            update_statement.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             update_statement.avail,

@@ -67,6 +67,7 @@ pub(crate) async fn edit_avail_by_uuid(
                 is_valid = TRUE  -- Ensure that the availability is revalidated
             WHERE availability.id = $1
             RETURNING
+                availability.id,
                 avail,
                 planned,
                 ict_type,
@@ -78,6 +79,7 @@ pub(crate) async fn edit_avail_by_uuid(
                 availability.updated
         )
         SELECT
+            update_statement.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             update_statement.avail,
@@ -125,30 +127,32 @@ pub(crate) async fn set_user_unavail(
             SET is_valid = FALSE
             WHERE availability.id = $1
             RETURNING
-            avail,
-            planned,
-            ict_type,
-            remarks,
-            saf100,
-            attended,
-            is_valid,
-            availability.created,
-            availability.updated,
+                id,
+                avail,
+                planned,
+                ict_type,
+                remarks,
+                saf100,
+                attended,
+                is_valid,
+                availability.created,
+                availability.updated,
             usr_id
         ) SELECT
-        usrs.ops_name,
-        usrs.usr_type AS "usr_type: _",
-        update_statement.avail,
-        update_statement.planned,
-        update_statement.ict_type AS "ict_type: _",
-        update_statement.remarks,
-        update_statement.saf100,
-        update_statement.attended,
-        update_statement.is_valid,
-        update_statement.created,
-        update_statement.updated
-        FROM update_statement
-        JOIN usrs ON update_statement.usr_id = usrs.id;
+            update_statement.id,
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            update_statement.avail,
+            update_statement.planned,
+            update_statement.ict_type AS "ict_type: _",
+            update_statement.remarks,
+            update_statement.saf100,
+            update_statement.attended,
+            update_statement.is_valid,
+            update_statement.created,
+            update_statement.updated
+            FROM update_statement
+            JOIN usrs ON update_statement.usr_id = usrs.id;
         "#,
         availability_id
     )
@@ -221,6 +225,61 @@ pub(crate) async fn get_upcoming_availability_by_tele_id(
     }
 }
 
+pub(crate) async fn get_upcoming_availability_details_by_tele_id(
+    conn: &PgPool,
+    tele_id: u64,
+) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
+    let today = Local::now().date_naive(); // Get today's date
+
+    let result = sqlx::query_as!(
+        AvailabilityDetails,
+        r#"
+        SELECT
+            availability.id,
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            availability.avail,
+            availability.ict_type AS "ict_type: _",
+            availability.remarks,
+            availability.planned,
+            availability.saf100,
+            availability.attended,
+            availability.is_valid,
+            availability.created,
+            availability.updated
+        FROM availability
+        JOIN usrs ON usrs.id = availability.usr_id
+        WHERE usrs.tele_id = $1
+          AND availability.avail >= $2
+          AND (availability.is_valid = TRUE OR availability.planned = TRUE)
+        ORDER BY availability.avail ASC;
+        "#,
+        tele_id as i64,
+        today
+    )
+        .fetch_all(conn)
+        .await;
+
+    match result {
+        Ok(availability_list) => {
+            log::info!(
+                "Found {} upcoming availability entries with details for tele_id: {}",
+                availability_list.len(),
+                tele_id
+            );
+            Ok(availability_list)
+        }
+        Err(e) => {
+            log::error!(
+                "Error fetching upcoming availability details for tele_id {}: {}",
+                tele_id,
+                e
+            );
+            Err(e)
+        }
+    }
+}
+
 pub(crate) async fn get_availability_by_uuid(
     conn: &PgPool,
     availability_id: Uuid,
@@ -284,6 +343,7 @@ pub(crate) async fn add_user_avail(
                     planned = COALESCE(EXCLUDED.planned, availability.planned),
                     is_valid = TRUE -- Revalidate the availability
             RETURNING
+                id,
                 usr_id,
                 avail,
                 ict_type,
@@ -296,6 +356,7 @@ pub(crate) async fn add_user_avail(
                 updated
         )
         SELECT
+            insert_statement.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             insert_statement.avail,
@@ -342,6 +403,7 @@ pub(crate) async fn get_availability_for_role_and_dates(
         AvailabilityDetails,
         r#"
         SELECT
+            availability.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             availability.avail,
@@ -437,6 +499,7 @@ pub(crate) async fn get_users_available_on_date(
         AvailabilityDetails,
         r#"
         SELECT
+            availability.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             availability.avail,
@@ -470,6 +533,71 @@ pub(crate) async fn get_users_available_on_date(
         }
         Err(e) => {
             log::error!("Error fetching users available on {}: {}", date, e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn toggle_planned_status(
+    conn: &PgPool,
+    availability_id: Uuid,
+) -> Result<AvailabilityDetails, sqlx::Error> {
+    let result = sqlx::query_as!(
+        AvailabilityDetails,
+        r#"
+        WITH update_statement AS (
+            UPDATE availability
+            SET planned = NOT planned
+            WHERE id = $1
+            RETURNING
+                id,
+                usr_id,
+                avail,
+                ict_type,
+                remarks,
+                planned,
+                saf100,
+                attended,
+                is_valid,
+                created,
+                updated
+        )
+        SELECT
+            update_statement.id,
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            update_statement.avail,
+            update_statement.planned,
+            update_statement.ict_type AS "ict_type: _",
+            update_statement.remarks,
+            update_statement.saf100,
+            update_statement.attended,
+            update_statement.is_valid,
+            update_statement.created,
+            update_statement.updated
+        FROM usrs
+        JOIN update_statement ON usrs.id = update_statement.usr_id;
+        "#,
+        availability_id
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            log::info!(
+                "Toggled planned status for availability with UUID: {}. New planned status: {}",
+                availability_id,
+                res.planned
+            );
+            Ok(res)
+        }
+        Err(e) => {
+            log::error!(
+                "Error toggling planned status for availability with UUID {}: {}",
+                availability_id,
+                e
+            );
             Err(e)
         }
     }

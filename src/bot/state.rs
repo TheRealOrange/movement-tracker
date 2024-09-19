@@ -14,6 +14,7 @@ use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
 use crate::bot::forecast::{forecast, forecast_view};
+use crate::bot::plan::{plan, plan_view};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, RoleType, Usr, UsrType};
 
 #[derive(Clone, Default)]
@@ -121,7 +122,15 @@ pub(super) enum State {
         start: NaiveDate, 
         end: NaiveDate
     },
-    // TODO: States meant for planning SANS for flight
+    // States meant for planning SANS for flight
+    PlanView {
+        user_details: Option<Usr>,
+        selected_date: Option<NaiveDate>,
+        availability_list: Vec<AvailabilityDetails>,
+        role_type: RoleType,
+        prefix: String,
+        start: usize
+    },
     // TODO: States meant for SANS attendance confirmation
     // States meant for editing users
     User,
@@ -157,11 +166,9 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![Commands::Cancel].endpoint(cancel));
 
     let admin_command_handler = teloxide::filter_command::<PrivilegedCommands, _>()
-        .branch(
-            case![State::Start]
-                .branch(case![PrivilegedCommands::User { ops_name }].endpoint(user))
-                .branch(case![PrivilegedCommands::Approve].endpoint(approve)),
-        );
+        .branch(case![PrivilegedCommands::User { ops_name }].endpoint(user))
+        .branch(case![PrivilegedCommands::Approve].endpoint(approve))
+        .branch(case![PrivilegedCommands::Plan { ops_name_or_date }].endpoint(plan));
 
     let message_handler = Update::filter_message()
         .branch(case![State::ErrorState].endpoint(error_state))
@@ -197,6 +204,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditType { user_details }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
+            .branch(case![State::PlanView { user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
         )
         .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { availability_list, action, prefix, start }].endpoint(availability_select))

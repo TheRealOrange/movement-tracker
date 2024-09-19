@@ -88,6 +88,7 @@ pub(crate) struct Availability {
 
 #[derive(Clone, sqlx::FromRow, Debug)]
 pub(crate) struct AvailabilityDetails {
+    pub id: Uuid,
     pub ops_name: String,
     pub usr_type: UsrType,
     pub avail: NaiveDate,
