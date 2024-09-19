@@ -18,8 +18,8 @@ pub(super) enum Commands {
     Register,
     #[command(description = "Indicate your availability (for SANS)")]
     Availability,
-    #[command(description = "Add information about your movement")]
-    Movement,
+    // #[command(description = "Add information about your movement")]
+    // Movement,
     #[command(description = "View information about the future availability")]
     Forecast,
     #[command(description = "Cancel current action")]
@@ -34,8 +34,14 @@ pub(super) enum Commands {
 pub(super) enum PrivilegedCommands {
     #[command(description = "Approve registration requests")]
     Approve,
-    #[command(description = "Modify user attributes")]
-    User,
+    #[command(description = "Modify user attributes, specify /user <OPS NAME>")]
+    User {
+        ops_name: String
+    },
+    #[command(description = "Plan for flight, specify /plan <OPS NAME> or /plan <date>")]
+    Plan {
+        ops_name_or_date: String
+    },
 }
 
 pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {

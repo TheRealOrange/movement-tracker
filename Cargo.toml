@@ -21,6 +21,7 @@ strum_macros = "0.26"
 rand = "0.8"
 chrono = "0.4.38"
 regex = "1.10.5"
+once_cell = "1.19.0"
 
 [dependencies.uuid]
 version = "1.10.0"

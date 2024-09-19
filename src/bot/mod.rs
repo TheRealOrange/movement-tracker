@@ -15,7 +15,9 @@ pub(self) mod state;
 pub(self) mod register;
 pub(self) mod apply;
 pub(self) mod availability;
-mod planning;
+pub(self) mod forecast;
+pub(self) mod notify;
+pub(self) mod plan;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -46,6 +48,20 @@ pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<Str
             );
         }
     }
+}
+
+pub(self) async fn handle_error(
+    bot: &Bot,
+    dialogue: &MyDialogue,
+    chat_id: ChatId,
+    username: &Option<String>,
+) {
+    send_msg(
+        bot.send_message(chat_id, "Error occurred accessing the database"),
+        username,
+    )
+        .await;
+    dialogue.update(State::ErrorState).await.unwrap_or(());
 }
 
 #[macro_export]

@@ -10,10 +10,10 @@ use super::{send_msg, HandlerResult, MyDialogue};
 use super::commands::{cancel, Commands, help, PrivilegedCommands};
 
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
-use super::user::user;
+use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
-use crate::bot::planning::{forecast, forecast_view};
+use crate::bot::forecast::{forecast, forecast_view};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, RoleType, Usr, UsrType};
 
 #[derive(Clone, Default)]
@@ -71,9 +71,9 @@ pub(super) enum State {
         admin: bool
     },
     // TODO: States used for adding personal movement details 
-    MovementView,
-    EditMovement,
-    AddMovement,
+    // MovementView,
+    // EditMovement,
+    // AddMovement,
     AddMovementDetails {
         details: String,
     },
@@ -114,7 +114,7 @@ pub(super) enum State {
         avail_type: Ict,
         avail_dates: Vec<NaiveDate>
     },
-    // TODO: States meant for viewing the forecast
+    // States meant for viewing the forecast
     ForecastView {
         availability_list: Vec<AvailabilityDetails>,
         role_type: RoleType, 
@@ -123,14 +123,25 @@ pub(super) enum State {
     },
     // TODO: States meant for planning SANS for flight
     // TODO: States meant for SANS attendance confirmation
-    // TODO: States meant for editing users
+    // States meant for editing users
     User,
-    UserSelect,
-    ChangeOpsName {
-        ops_name: String,
+    UserEdit {
+        user_details: Usr
     },
-    ChangeUserType {
-        user_type: String
+    UserEditName {
+        user_details: Usr
+    },
+    UserEditOpsName {
+        user_details: Usr
+    },
+    UserEditType {
+        user_details: Usr
+    },
+    UserEditAdmin {
+        user_details: Usr
+    },
+    UserEditDeleteConfirm {
+        user_details: Usr
     },
     ErrorState
 }
@@ -148,7 +159,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
     let admin_command_handler = teloxide::filter_command::<PrivilegedCommands, _>()
         .branch(
             case![State::Start]
-                .branch(case![PrivilegedCommands::User].endpoint(user))
+                .branch(case![PrivilegedCommands::User { ops_name }].endpoint(user))
                 .branch(case![PrivilegedCommands::Approve].endpoint(approve)),
         );
 
@@ -162,6 +173,8 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
                 .branch(admin_command_handler)
                 .branch(case![State::ApplyEditName { application, admin }].endpoint(apply_edit_name))
                 .branch(case![State::ApplyEditOpsName { application, admin }].endpoint(apply_edit_ops_name))
+                .branch(case![State::UserEditName { user_details }].endpoint(user_edit_name))
+                .branch(case![State::UserEditOpsName { user_details }].endpoint(user_edit_ops_name))
             )
             .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
             .branch(case![State::AvailabilityModifyRemarks { availability_entry, action, start }].endpoint(availability_modify_remarks))
@@ -180,6 +193,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
             .branch(case![State::ApplyEditType { application, admin }].endpoint(apply_edit_type))
             .branch(case![State::ApplyEditAdmin { application, admin }].endpoint(apply_edit_admin))
+            .branch(case![State::UserEdit { user_details }].endpoint(user_edit_prompt))
+            .branch(case![State::UserEditType { user_details }].endpoint(user_edit_type))
+            .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
+            .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
         )
         .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { availability_list, action, prefix, start }].endpoint(availability_select))

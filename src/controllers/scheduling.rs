@@ -429,3 +429,48 @@ pub(crate) async fn get_furthest_avail_date_for_role(
     }
 }
 
+pub(crate) async fn get_users_available_on_date(
+    conn: &PgPool,
+    date: NaiveDate,
+) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
+    let result = sqlx::query_as!(
+        AvailabilityDetails,
+        r#"
+        SELECT
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            availability.avail,
+            availability.ict_type AS "ict_type: _",
+            availability.remarks,
+            availability.planned,
+            availability.saf100,
+            availability.attended,
+            availability.is_valid,
+            availability.created,
+            availability.updated
+        FROM availability
+        JOIN usrs ON usrs.id = availability.usr_id
+        WHERE availability.avail = $1
+        AND (availability.is_valid = TRUE OR availability.planned = TRUE)
+        ORDER BY usrs.ops_name ASC;
+        "#,
+        date
+    )
+        .fetch_all(conn)
+        .await;
+
+    match result {
+        Ok(availability_list) => {
+            log::info!(
+                "Found {} users available on {}",
+                availability_list.len(),
+                date
+            );
+            Ok(availability_list)
+        }
+        Err(e) => {
+            log::error!("Error fetching users available on {}: {}", date, e);
+            Err(e)
+        }
+    }
+}

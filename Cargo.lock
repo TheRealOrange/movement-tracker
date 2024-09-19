@@ -1009,6 +1009,7 @@ dependencies = [
  "chrono",
  "dotenvy",
  "log",
+ "once_cell",
  "pretty_env_logger",
  "rand",
  "regex",

@@ -12,7 +12,7 @@ use sqlx::types::Uuid;
 use strum::IntoEnumIterator;
 use teloxide::dispatching::dialogue::InMemStorageError;
 use uuid::Error;
-use crate::bot::{send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit};
 use crate::types::{Apply, RoleType, Usr, UsrType};
@@ -110,7 +110,7 @@ async fn display_application_edit_prompt(
                 &application.ops_name,
                 application.role_type.as_ref(),
                 application.usr_type.as_ref(),
-                &application.created,
+                &application.created.format("%b-%d-%Y %H:%M:%S").to_string(),
                 &application.chat_username,
                 if admin == true { "YES" } else { "NO" }
             )
@@ -178,15 +178,6 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
         return Ok(());
     };
 
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_parameters(ReplyParameters::new(msg.id)),
-            &user.username
-        ).await;
-    };
-
     // Retrieve all the pending applications
     match controllers::apply::get_all_apply_requests(&pool)
         .await {
@@ -226,10 +217,7 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
                 Err(_) => dialogue.update(State::ErrorState).await?
             };
         },
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        },
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
 
     Ok(())
@@ -248,14 +236,6 @@ pub(super) async fn apply_view(
         "Prefix" => prefix,
         "Start" => start
     );
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
 
     match q.data {
         None => {
@@ -289,10 +269,7 @@ pub(super) async fn apply_view(
                                         log::debug!("Transitioning to ApplyEditPrompt with Application: {:?}, Admin: {:?}", application, false );
                                         dialogue.update(State::ApplyEditPrompt { application, admin: false }).await?;
                                     }
-                                    Err(_) => {
-                                        handle_error().await;
-                                        dialogue.update(State::ErrorState).await?;
-                                    }
+                                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }
                             }
                             Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8).await?,
@@ -318,14 +295,6 @@ pub(super) async fn apply_edit_prompt(
         "Application" => application,
         "Admin" => admin
     );
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
 
     match q.data {
         None => {
@@ -361,16 +330,10 @@ pub(super) async fn apply_edit_prompt(
 
                                     dialogue.update(State::Start).await?;
                                 }
-                                Err(_) => {
-                                    handle_error().await;
-                                    dialogue.update(State::ErrorState).await?;
-                                }
+                                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                             }
                         }
-                        Err(_) => {
-                            handle_error().await;
-                            dialogue.update(State::ErrorState).await?;
-                        }
+                        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                     }
                 }
                 "CANCEL" => {
@@ -567,9 +530,9 @@ pub(super) async fn apply_edit_type(
             log::debug!("Received input: {:?}", &usrtype);
             match UsrType::from_str(&usrtype) {
                 Ok(user_type_enum) => {
-                    log::debug!("Selected role type: {:?}", user_type_enum);
+                    log::debug!("Selected user type: {:?}", user_type_enum);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Selected role type: {}", user_type_enum.as_ref())),
+                        bot.send_message(dialogue.chat_id(), format!("Selected user type: {}", user_type_enum.as_ref())),
                         &q.from.username,
                     ).await;
 
@@ -580,7 +543,7 @@ pub(super) async fn apply_edit_type(
                 Err(e) => {
                     log::error!("Invalid role type received: {}", e);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
+                        bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                         &q.from.username,
                     ).await;
                     display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
@@ -624,7 +587,7 @@ pub(super) async fn apply_edit_admin(
             } else {
                 log::error!("Invalid set admin input received: {}", make_admin_input);
                 send_msg(
-                    bot.send_message(dialogue.chat_id(), ("Please select an option or type /cancel to abort")),
+                    bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                     &q.from.username,
                 ).await;
                 display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;

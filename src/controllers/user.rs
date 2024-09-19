@@ -1,6 +1,7 @@
 use crate::types::{Usr, RoleType, UsrType};
 use sqlx::PgPool;
 use teloxide::types::CountryCode::SO;
+use sqlx::types::Uuid;
 
 pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
@@ -35,7 +36,7 @@ pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<b
     }
 }
 
-async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> Result<bool, sqlx::Error> {
+pub(crate) async fn user_exists_ops_name(conn: &PgPool, ops_name: &str) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
@@ -104,7 +105,7 @@ pub(crate) async fn get_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<U
     }
 }
 
-async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> Result<Usr, sqlx::Error> {
+pub(crate) async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> Result<Usr, sqlx::Error> {
     let result = sqlx::query_as!(
         Usr,
         r#"
@@ -191,7 +192,7 @@ pub(crate) async fn remove_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Resul
     let result = sqlx::query!(
         r#"
         UPDATE usrs
-        SET is_valid = FALSE, updated = NOW()
+        SET is_valid = FALSE
         WHERE tele_id = $1 AND is_valid = TRUE;
         "#,
         tele_id as i64
@@ -211,6 +212,86 @@ pub(crate) async fn remove_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Resul
         }
         Err(e) => {
             log::error!("Error soft deleting user: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn remove_user_by_uuid(conn: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE usrs
+        SET is_valid = FALSE
+        WHERE id = $1 AND is_valid = TRUE;
+        "#,
+        id
+    )
+        .execute(conn)
+        .await;
+
+    match result {
+        Ok(query_result) => {
+            if query_result.rows_affected() == 1 {
+                log::info!("Successfully soft-deleted user with id: {}", id);
+                Ok(true)
+            } else {
+                log::warn!("No user found with id: {}", id);
+                Ok(false)
+            }
+        }
+        Err(e) => {
+            log::error!("Error soft deleting user by id: {}", e);
+            Err(e)
+        }
+    }
+}
+
+
+pub(crate) async fn update_user(
+    conn: &PgPool,
+    user_details: &Usr,
+) -> Result<Usr, sqlx::Error> {
+    let result = sqlx::query_as!(
+        Usr,
+        r#"
+        UPDATE usrs
+        SET
+            tele_id = $1,
+            name = $2,
+            ops_name = $3,
+            usr_type = $4,
+            role_type = $5,
+            admin = $6
+        WHERE id = $7 AND is_valid = TRUE
+        RETURNING
+            id,
+            tele_id,
+            name,
+            ops_name,
+            usr_type AS "usr_type: _",
+            role_type AS "role_type: _",
+            admin,
+            created,
+            updated
+        "#,
+        user_details.tele_id as i64,
+        &user_details.name,
+        &user_details.ops_name,
+        user_details.usr_type.clone() as UsrType,
+        user_details.role_type.clone() as RoleType,
+        user_details.admin,
+        user_details.id,
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(user) => {
+            log::info!("Updated user with id: {}", user_details.id);
+            Ok(user)
+        }
+        Err(e) => {
+            log::error!("Error updating user: {}", e);
             Err(e)
         }
     }

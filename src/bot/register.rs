@@ -10,7 +10,7 @@ use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboar
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit};
 use crate::types::{RoleType, UsrType};
-use super::{send_msg, HandlerResult, MyDialogue};
+use super::{handle_error, send_msg, HandlerResult, MyDialogue};
 
 async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
     let roles = RoleType::iter()
@@ -70,15 +70,6 @@ pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
         return Ok(());
     };
 
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_parameters(ReplyParameters::new(msg.id)),
-            &user.username
-        ).await;
-    };
-
     // Check if the telegram ID exists in the database
     match controllers::user::user_exists_tele_id(&pool, user.id.0).await{
         Ok(true) => {
@@ -94,10 +85,7 @@ pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
             log::debug!("Transitioning to RegisterRole");
             dialogue.update(State::RegisterRole).await?;
         },
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        },
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
 
     Ok(())
@@ -310,15 +298,7 @@ pub(super) async fn register_complete(
         "Name" => name,
         "Ops Name" => ops_name
     );
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
-
+    
     match q.data {
         None => {
             send_msg(
@@ -355,10 +335,7 @@ pub(super) async fn register_complete(
                         ).await;
                         dialogue.update(State::Start).await?
                     },
-                    Err(_) => {
-                        handle_error().await;
-                        dialogue.update(State::ErrorState).await?;
-                    },
+                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                 }
             } else {
                 send_msg(

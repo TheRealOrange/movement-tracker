@@ -12,7 +12,7 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
 use uuid::Uuid;
-use crate::bot::{send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State::{AvailabilityModify, AvailabilitySelect};
@@ -27,7 +27,7 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
     
-    if (existing.len() > 0) {
+    if existing.len() > 0 {
         options.push(control_options);
     }
     options.push(vec![InlineKeyboardButton::callback("DONE", "DONE")]);
@@ -240,13 +240,6 @@ async fn delete_availability_entry_and_go_back(
     action: String,
     pool: &PgPool
 ) -> HandlerResult {
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            username
-        ).await;
-    };
     
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
         Ok(user) => {
@@ -259,19 +252,13 @@ async fn delete_availability_entry_and_go_back(
                         ).await;
                         handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool).await?;
                     }
-                    Err(_) => {
-                        handle_error().await;
-                        dialogue.update(State::ErrorState).await?;
-                    }
+                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
                 }
             } else {
                 dialogue.update(State::ErrorState).await?;
             }
         }
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        }
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
     }
     
     Ok(())
@@ -287,13 +274,6 @@ async fn handle_go_back(
     action: String,
     pool: &PgPool
 ) -> HandlerResult {
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &username
-        ).await;
-    };
     
     // Generate random prefix to make the IDs only applicable to this dialogue instance
     let prefix: String = rand::thread_rng()
@@ -314,10 +294,7 @@ async fn handle_go_back(
                 handle_re_show_options(bot, dialogue, username, availability_list, prefix, new_start, show, action).await?;
             }
         }
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        },
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
     }
     
     Ok(())
@@ -336,13 +313,6 @@ async fn modify_availability_and_go_back(
     remark_edit: Option<String>,
     pool: &PgPool
 ) -> HandlerResult {
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            username
-        ).await;
-    };
     
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
         Ok(user) => {
@@ -366,10 +336,7 @@ async fn modify_availability_and_go_back(
                 dialogue.update(State::ErrorState).await?;
             }
         }
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        }
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
     }
     
     Ok(())
@@ -421,15 +388,6 @@ pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, p
         return Ok(());
     };
 
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_parameters(ReplyParameters::new(msg.id)),
-            &user.username
-        ).await;
-    };
-
     // Retrieve all the pending applications
     match controllers::scheduling::get_upcoming_availability_by_tele_id(&pool, user.id.0)
         .await {
@@ -437,10 +395,7 @@ pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, p
             display_availability_options(&bot, dialogue.chat_id(), &user.username, &availability_list).await;
             dialogue.update(State::AvailabilityView { availability_list }).await?
         }
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        },
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
     
     Ok(())
@@ -721,14 +676,6 @@ pub(super) async fn availability_select(
         "Start" => start
     );
 
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
-
     match q.data {
         None => {
             send_msg(
@@ -773,10 +720,7 @@ pub(super) async fn availability_select(
                                             dialogue.update(State::ErrorState).await?;
                                         }
                                     }
-                                    Err(_) => {
-                                        handle_error().await;
-                                        dialogue.update(State::ErrorState).await?;
-                                    }
+                                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }
                             }
                             Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?,
@@ -884,14 +828,6 @@ pub(super) async fn availability_modify_type(
         "Action" => action,
         "Start" => start
     );
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
 
     match q.data {
         None => {

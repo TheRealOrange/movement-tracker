@@ -1,115 +1,113 @@
 use chrono::{NaiveDate, Datelike, Utc, Local};
 use regex::Regex;
 use std::collections::HashMap;
+use once_cell::sync::Lazy;
 
-pub(crate)
-fn parse_dates(input: &str) -> Vec<NaiveDate> {
-    let mut dates = Vec::new();
-    let today = Local::now().naive_utc().date();
+static DAY_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^\s*(\d{1,2})(?:st|nd|rd|th)?[-/\s]+([A-Za-z]+|\d{1,2})(?:[-/\s]+(\d{2,4}))?\s*$").unwrap()
+});
+
+static MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?(?:[-/\s]+(\d{2,4}))?\s*$").unwrap()
+});
+
+static FULL_MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?[-/\s]+(\d{4})\s*$").unwrap()
+});
+
+static MONTHS_MAP: Lazy<HashMap<&'static str, u32>> = Lazy::new(|| {
+    [
+        ("jan", 1), ("january", 1), ("feb", 2), ("february", 2),
+        ("mar", 3), ("march", 3), ("apr", 4), ("april", 4),
+        ("may", 5), ("jun", 6), ("june", 6), ("jul", 7),
+        ("july", 7), ("aug", 8), ("august", 8), ("sep", 9),
+        ("sept", 9), ("september", 9), ("oct", 10), ("october", 10),
+        ("nov", 11), ("november", 11), ("dec", 12), ("december", 12),
+    ]
+        .iter()
+        .cloned()
+        .collect()
+});
+
+pub(crate) fn parse_single_date(input: &str) -> Option<NaiveDate> {
+    let today = Local::now().naive_local().date();
     let current_year = today.year();
 
-    // Regex patterns for different date formats
-    let day_first_pattern = Regex::new(r"(\d{1,2})(?:st|nd|rd|th)?[-/\s]([A-Za-z]+|\d{1,2})[-/\s]?(\d{2,4})?").unwrap();
-    let month_first_pattern = Regex::new(r"([A-Za-z]+)[-/\s]?(\d{1,2})(?:st|nd|rd|th)?[-/\s]?(\d{2,4})?").unwrap();
-    let full_month_first_pattern = Regex::new(r"([A-Za-z]+)[-/\s](\d{1,2})(?:st|nd|rd|th)?[-/\s](\d{4})").unwrap();
+    // Try full month-first pattern with explicit year (e.g., May 17 2024, June 30th 2024)
+    if let Some(caps) = FULL_MONTH_FIRST_PATTERN.captures(input) {
+        let month_str = &caps[1];
+        let day = caps[2].parse::<u32>().ok()?;
+        let year = caps[3].parse::<i32>().unwrap_or(current_year);
 
-    // Map of month names to numbers
-    let months_map: HashMap<&str, u32> = [
-        ("Jan", 1), ("January", 1), ("Feb", 2), ("February", 2), ("Mar", 3), ("March", 3),
-        ("Apr", 4), ("April", 4), ("May", 5), ("Jun", 6), ("June", 6), ("Jul", 7), ("July", 7),
-        ("Aug", 8), ("August", 8), ("Sep", 9), ("Sept", 9), ("September", 9), ("Oct", 10), ("October", 10),
-        ("Nov", 11), ("November", 11), ("Dec", 12), ("December", 12)
-    ].iter().cloned().collect();
+        let month_str_lower = month_str.to_lowercase();
+        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied()?;
 
-    // Split input by commas
-    let date_strings: Vec<&str> = input.split(',').map(|s| s.trim()).collect();
+        NaiveDate::from_ymd_opt(year, month, day)
+    }
+    // Try day-first pattern (e.g., 28/08, 1st Sept)
+    else if let Some(caps) = DAY_FIRST_PATTERN.captures(input) {
+        let day = caps[1].parse::<u32>().ok()?;
+        let month_str = &caps[2];
+        let year_str = caps.get(3).map_or("", |m| m.as_str());
 
-    // Parse each date string
-    for date_str in date_strings {
-        let mut parsed_successfully = false;
+        let month = if let Ok(month_num) = month_str.parse::<u32>() {
+            month_num
+        } else {
+            let month_str_lower = month_str.to_lowercase();
+            MONTHS_MAP.get(month_str_lower.as_str()).copied()?
+        };
 
-        // Try full month-first pattern with explicit year (e.g., May 17 2024, June 30th 2024)
-        if let Some(caps) = full_month_first_pattern.captures(date_str) {
-            let month_str = &caps[1];
-            let day = caps[2].parse::<u32>().unwrap_or(1);
-            let year = caps[3].parse::<i32>().unwrap_or(current_year);
+        let mut year = if !year_str.is_empty() {
+            year_str.parse::<i32>().unwrap_or(current_year)
+        } else {
+            current_year
+        };
 
-            let month = months_map.get(month_str).copied().unwrap_or(1);
-
-            if let Some(valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
-                dates.push(valid_date);
-                parsed_successfully = true;
+        if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
+            if valid_date < today {
+                year += 1;
+                valid_date = NaiveDate::from_ymd_opt(year, month, day)?;
             }
-        }
-        // Try day-first pattern (e.g., 28/08, 1st Sept)
-        else if let Some(caps) = day_first_pattern.captures(date_str) {
-            let day = caps[1].parse::<u32>().unwrap_or(1);
-            let month_str = &caps[2];
-            let year_str = caps.get(3).map_or("", |m| m.as_str());
-
-            let month = if let Ok(month_num) = month_str.parse::<u32>() {
-                month_num
-            } else {
-                months_map.get(month_str).copied().unwrap_or(1)
-            };
-
-            // Use provided year or the current year
-            let mut year = if !year_str.is_empty() {
-                year_str.parse::<i32>().unwrap_or(current_year)
-            } else {
-                current_year
-            };
-
-            // Construct a date with the current year
-            if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
-                // If the date is in the past, increment the year to make it in the future
-                if valid_date < today {
-                    year += 1;
-                    if let Some(future_date) = NaiveDate::from_ymd_opt(year, month, day) {
-                        valid_date = future_date;
-                    }
-                }
-                dates.push(valid_date);
-                parsed_successfully = true;
-            }
-        }
-        // Try month-first pattern (e.g., November 2nd, Jul 4, Feb 23)
-        else if let Some(caps) = month_first_pattern.captures(date_str) {
-            let month_str = &caps[1];
-            let day = caps[2].parse::<u32>().unwrap_or(1);
-            let year_str = caps.get(3).map_or("", |m| m.as_str());
-
-            let month = months_map.get(month_str).copied().unwrap_or(1);
-
-            // Use provided year or the current year
-            let mut year = if !year_str.is_empty() {
-                year_str.parse::<i32>().unwrap_or(current_year)
-            } else {
-                current_year
-            };
-
-            // Construct a date with the current year
-            if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
-                // If the date is in the past, increment the year to make it in the future
-                if valid_date < today {
-                    year += 1;
-                    if let Some(future_date) = NaiveDate::from_ymd_opt(year, month, day) {
-                        valid_date = future_date;
-                    }
-                }
-                dates.push(valid_date);
-                parsed_successfully = true;
-            }
-        }
-
-        // If no valid pattern matched or parsing failed, log the invalid string
-        if !parsed_successfully {
-            log::debug!("Failed to parse date string: '{}'", date_str);
+            Some(valid_date)
+        } else {
+            None
         }
     }
+    // Try month-first pattern (e.g., November 2nd, Jul 4, Feb 23)
+    else if let Some(caps) = MONTH_FIRST_PATTERN.captures(input) {
+        let month_str = &caps[1];
+        let day = caps[2].parse::<u32>().ok()?;
+        let year_str = caps.get(3).map_or("", |m| m.as_str());
 
-    // Return the parsed dates
-    dates
+        let month_str_lower = month_str.to_lowercase();
+        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied()?;
+
+        let mut year = if !year_str.is_empty() {
+            year_str.parse::<i32>().unwrap_or(current_year)
+        } else {
+            current_year
+        };
+
+        if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
+            if valid_date < today {
+                year += 1;
+                valid_date = NaiveDate::from_ymd_opt(year, month, day)?;
+            }
+            Some(valid_date)
+        } else {
+            None
+        }
+    } else {
+        log::debug!("Failed to parse date string: '{}'", input);
+        None
+    }
+}
+
+pub(crate) fn parse_dates(input: &str) -> Vec<NaiveDate> {
+    input
+        .split(',')
+        .filter_map(|s| parse_single_date(s.trim()))
+        .collect()
 }
 
 pub(crate) fn format_dates_as_markdown(dates: &Vec<NaiveDate>) -> String {

@@ -10,7 +10,7 @@ use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message};
 use teloxide::requests::Requester;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
-use crate::bot::{send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::types::{Availability, AvailabilityDetails, RoleType, UsrType};
@@ -61,15 +61,15 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
         output_text.push_str(&format!("__{}__\n", date.format("%b %d"))); // Format as "Sep 05"
 
         for availability in availabilities {
-            let planned_str = if availability.planned { "\\(PLANNED\\)" } else { "" };
-            let avail = if !availability.is_valid { "*\\(UNAVAIL\\)*" } else { "" };
-            let usrtype_str = if availability.usr_type == UsrType::NS { "\\(NS\\)" } else { "" };
-            let saf100_str = if availability.saf100 { "SAF100 ISSUED" } else { "" };
+            let planned_str = if availability.planned { " \\(PLANNED\\)" } else { "" };
+            let avail = if !availability.is_valid { " *\\(UNAVAIL\\)*" } else { "" };
+            let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
+            let saf100_str = if availability.saf100 { " SAF100 ISSUED" } else { "" };
 
             // Truncate remarks to a max of 10 characters
             let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.len() > 10 {
-                    format!("{}: {}...", saf100_str, &remarks[0..10])
+                if remarks.len() > 15 {
+                    format!("{}: {}...", saf100_str, &remarks[0..15])
                 } else {
                     format!("{}: {}", saf100_str, remarks)
                 }
@@ -80,7 +80,7 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
             let escaped_remarks = utils::escape_special_characters(&remarks_str);
 
             output_text.push_str(&format!(
-                "\\- {} __{}__ {} {} {} {}\n",
+                "\\- {} __{}__{}{}{}{}\n",
                 availability.ops_name,
                 availability.ict_type.as_ref(),
                 planned_str,
@@ -112,15 +112,6 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
         return Ok(());
     };
 
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database")
-                .reply_parameters(ReplyParameters::new(msg.id)),
-            &user.username
-        ).await;
-    };
-
     // Get the user in the database
     match controllers::user::get_user_by_tele_id(&pool, user.id.0).await{
         Ok(retrieved_user) => {
@@ -133,16 +124,10 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
                     display_availability_forecast(&bot, dialogue.chat_id(), &user.username, role_type.clone(), &availability_list, start, end).await;
                     dialogue.update(State::ForecastView { availability_list, role_type, start, end }).await?;
                 }
-                Err(_) => {
-                    handle_error().await;
-                    dialogue.update(State::ErrorState).await?;
-                },
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
             }
         },
-        Err(_) => {
-            handle_error().await;
-            dialogue.update(State::ErrorState).await?;
-        },
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
 
     Ok(())
@@ -156,14 +141,6 @@ pub(super) async fn forecast_view(
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(dialogue.chat_id(), "register_role", "Callback", q);
-
-    // Helper function to log and return false on any errors
-    let handle_error = || async {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error occurred accessing the database"),
-            &q.from.username
-        ).await;
-    };
 
     match q.data {
         None => {
@@ -194,10 +171,7 @@ pub(super) async fn forecast_view(
                         new_start = Local::now().date_naive(); // Get today's date in the local timezone
                         new_end = last_date.unwrap_or(end);
                     }
-                    Err(_) => {
-                        handle_error().await;
-                        dialogue.update(State::ErrorState).await?;
-                    },
+                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                 }
             } else if option == "DONE" {
                 send_msg(
@@ -223,10 +197,7 @@ pub(super) async fn forecast_view(
                     display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, new_role.clone(), &availability_list_new, new_start, new_end).await;
                     dialogue.update(State::ForecastView { availability_list: availability_list_new, role_type: new_role, start: new_start, end: new_end }).await?;
                 }
-                Err(_) => {
-                    handle_error().await;
-                    dialogue.update(State::ErrorState).await?;
-                },
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
     }
