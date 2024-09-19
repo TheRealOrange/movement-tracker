@@ -5,14 +5,12 @@ use crate::{controllers, log_endpoint_hit, utils};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::types::chrono::NaiveDate;
+use sqlx::types::Uuid;
 use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-use teloxide::Bot;
-use uuid::Uuid;
+use teloxide::prelude::*;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
 
 async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();

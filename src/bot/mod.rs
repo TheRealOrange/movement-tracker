@@ -4,7 +4,7 @@ use state::State;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::Dispatcher;
 use teloxide::payloads::SendMessage;
-use teloxide::prelude::{ChatId, Dialogue, Requester};
+use teloxide::prelude::*;
 use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
 
@@ -21,13 +21,11 @@ pub(self) mod plan;
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-pub(crate) async fn init_bot(pool: PgPool) {
-    let bot = Bot::from_env();
-
+pub(crate) async fn init_bot(bot: Bot, pool: PgPool) {
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
-            InMemStorage::<State>::new(), // Provide the InMemStorage in Arc
-            pool                          // Provide the PgPool as well
+            InMemStorage::<State>::new(),
+            pool
         ])
         .enable_ctrlc_handler()
         .build()

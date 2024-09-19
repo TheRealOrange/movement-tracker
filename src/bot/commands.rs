@@ -34,14 +34,16 @@ pub(super) enum Commands {
 pub(super) enum PrivilegedCommands {
     #[command(description = "Approve registration requests")]
     Approve,
-    #[command(description = "Modify user attributes, specify /user <OPS NAME>")]
+    #[command(description = "Modify user attributes, /user <OPS NAME>")]
     User {
         ops_name: String
     },
-    #[command(description = "Plan for flight, specify /plan <OPS NAME> or /plan <date>")]
+    #[command(description = "Plan for flight, /plan <OPS NAME> or /plan <date>")]
     Plan {
         ops_name_or_date: String
     },
+    #[command(description = "Edit notification settings for current chat")]
+    Notify
 }
 
 pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {

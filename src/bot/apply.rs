@@ -8,12 +8,10 @@ use sqlx::types::Uuid;
 use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
+use chrono::Local;
 use strum::IntoEnumIterator;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, ChatId, Message};
-use teloxide::requests::Requester;
+use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use teloxide::Bot;
 
 async fn display_applications(
     bot: &Bot,
@@ -108,7 +106,7 @@ async fn display_application_edit_prompt(
                 &application.ops_name,
                 application.role_type.as_ref(),
                 application.usr_type.as_ref(),
-                &application.created.format("%b-%d-%Y %H:%M:%S").to_string(),
+                &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
                 &application.chat_username,
                 if admin == true { "YES" } else { "NO" }
             )

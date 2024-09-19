@@ -9,10 +9,8 @@ use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
-use teloxide::Bot;
+use teloxide::prelude::*;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
 use uuid::Uuid;
 
 // Helper function to display a user's availability

@@ -11,7 +11,7 @@ teloxide = { version = "0.13", features = ["macros"] }
 log = "0.4"
 pretty_env_logger = "0.5.0"
 #sqlx library for connection to postgres database
-sqlx = { version = "0.8.2", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid"]}
+sqlx = { version = "0.8.2", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "macros"]}
 #tokio runtime for async code
 tokio = { version =  "1.40", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1.0.210", features = ["derive"] }

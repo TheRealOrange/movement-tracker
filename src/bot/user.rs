@@ -4,11 +4,10 @@ use crate::types::{Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 use sqlx::PgPool;
 use std::str::FromStr;
+use chrono::Local;
 use strum::IntoEnumIterator;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
+use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use teloxide::Bot;
 
 async fn display_user_edit_prompt(
     bot: &Bot,
@@ -35,8 +34,8 @@ async fn display_user_edit_prompt(
                     user_details.role_type.as_ref(),
                     user_details.usr_type.as_ref(),
                     if user_details.admin == true { "YES" } else { "NO" },
-                    &user_details.updated.format("%b-%d-%Y %H:%M:%S").to_string(),
-                    &user_details.updated.format("%b-%d-%Y %H:%M:%S").to_string()
+                    &user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
+                    &user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()
             )
         )
             .reply_markup(InlineKeyboardMarkup::new(options)),

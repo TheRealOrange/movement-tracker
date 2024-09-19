@@ -5,11 +5,8 @@ use crate::{controllers, log_endpoint_hit};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::Message;
-use teloxide::requests::Requester;
-use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use teloxide::Bot;
+use teloxide::prelude::*;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
 
 async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
     let roles = RoleType::iter()

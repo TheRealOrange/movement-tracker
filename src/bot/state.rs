@@ -3,17 +3,17 @@ use super::{send_msg, HandlerResult, MyDialogue};
 use crate::bot::apply::{apply_edit_admin, apply_edit_name, apply_edit_ops_name, apply_edit_prompt, apply_edit_role, apply_edit_type, apply_view, approve};
 use chrono::NaiveDate;
 use sqlx::PgPool;
+use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::{dialogue, UpdateHandler};
 use teloxide::dptree::{case, endpoint};
+use teloxide::prelude::*;
 use teloxide::types::ReplyParameters;
-use teloxide::{dispatching::dialogue::InMemStorage, prelude::*};
-
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
 use crate::bot::forecast::{forecast, forecast_view};
 use crate::bot::plan::{plan, plan_view};
-use crate::types::{Apply, Availability, AvailabilityDetails, Ict, RoleType, Usr, UsrType};
+use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 
 #[derive(Clone, Default)]
@@ -149,6 +149,11 @@ pub(super) enum State {
     },
     UserEditDeleteConfirm {
         user_details: Usr
+    },
+    // States meant for editing the notification settings
+    NotifySettings {
+        notification_settings: NotificationSettings,
+        chat_id: ChatId
     },
     ErrorState
 }

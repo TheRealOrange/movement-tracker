@@ -2,6 +2,7 @@ mod bot;
 mod controllers;
 pub(crate) mod types;
 mod utils;
+mod notifier;
 
 use std::env;
 use sqlx::PgPool;
@@ -20,16 +21,29 @@ async fn main() {
 
     // Add the default user
     match add_default_user_from_env(&conn_pool).await {
-        Ok(user) => {
-            println!("Default user added or already exists: {:?}", user);
+        Ok(()) => {
+            log::info!("Default user added or already exists.");
         }
         Err(e) => {
-            eprintln!("Error adding default user: {}", e);
+            log::error!("Error adding default user: {}", e);
         }
     }
 
-    log::info!("Starting command bot...");
-    bot::init_bot(conn_pool).await;
+    log::info!("Starting bot and scheduled notifications...");
+
+    let bot = Bot::from_env();
+
+    // Clone the bot and conn_pool for the notifier task
+    let notifier_bot = bot.clone();
+    let notifier_conn_pool = conn_pool.clone();
+
+    // Start the notifier task
+    tokio::spawn(async move {
+        notifier::start_notifier(notifier_bot, notifier_conn_pool).await;
+    });
+
+    // Start the bot
+    bot::init_bot(bot, conn_pool).await;
 }
 
 

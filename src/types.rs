@@ -101,6 +101,31 @@ pub(crate) struct AvailabilityDetails {
     pub updated: DateTime<Utc>,
 }
 
+#[derive(Clone, sqlx::FromRow, Debug)]
+pub(crate) struct ScheduledNotifications {
+    pub id: Uuid,
+    pub avail_id: Uuid,
+    pub scheduled_time: DateTime<Utc>,
+    pub sent: bool,
+    pub created: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+    pub is_valid: bool,
+}
+
+#[derive(Clone, sqlx::FromRow, Debug)]
+pub(crate) struct NotificationSettings {
+    pub id: Uuid,
+    pub chat_id: i64,
+    pub notif_system: bool,
+    pub notif_register: bool,
+    pub notif_availability: bool,
+    pub notif_plan: bool,
+    pub notif_conflict: bool,
+    pub created: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
+    pub is_valid: bool,
+}
+
 impl PgHasArrayType for Availability {
     fn array_type_info() -> PgTypeInfo {
         PgTypeInfo::with_name("_availability")

@@ -8,11 +8,8 @@ use chrono::{Duration, Local, NaiveDate};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use teloxide::payloads::SendMessageSetters;
-use teloxide::prelude::{CallbackQuery, ChatId, Message};
-use teloxide::requests::Requester;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
-use teloxide::Bot;
+use teloxide::prelude::*;
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
 
 async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
