@@ -122,4 +122,43 @@ FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
+DO $$ BEGIN
+CREATE TABLE IF NOT EXISTS scheduled_notifications  (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    avail_id UUID REFERENCES availability(id) NOT NULL,
+    scheduled_time TIMESTAMP WITH TIME ZONE,
+    sent BOOLEAN DEFAULT FALSE,
+    created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    is_valid BOOLEAN NOT NULL DEFAULT TRUE
+);
+DROP TRIGGER IF EXISTS scheduled_notifications_update
+ON scheduled_notifications;
+CREATE TRIGGER scheduled_notifications_update
+    BEFORE UPDATE ON scheduled_notifications
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
+END $$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+CREATE TABLE IF NOT EXISTS notification_settings   (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    chat_id INT8 UNIQUE NOT NULL,
+    notif_system BOOLEAN DEFAULT FALSE,
+    notif_register BOOLEAN DEFAULT FALSE,
+    notif_availability BOOLEAN DEFAULT FALSE,
+    notif_plan BOOLEAN DEFAULT FALSE,
+    notif_conflict BOOLEAN DEFAULT FALSE,
+    created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    is_valid BOOLEAN NOT NULL DEFAULT TRUE
+    );
+DROP TRIGGER IF EXISTS notification_settings_update
+ON notification_settings;
+CREATE TRIGGER notification_settings_update
+    BEFORE UPDATE ON notification_settings
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
+END $$ LANGUAGE plpgsql;
+
 COMMIT;

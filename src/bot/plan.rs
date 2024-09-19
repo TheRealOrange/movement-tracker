@@ -22,26 +22,15 @@ async fn display_user_availability(
     username: &Option<String>,
     user_details: &Usr,
     availability_list: &Vec<AvailabilityDetails>,
-    role_type: &RoleType,
     prefix: &String,
     start: usize,
     show: usize,
 ) -> Result<(), ()> {
-    let slice_end = min(start+show, availability_list.len()-1);
-    let shown_entries = if let Some(shown_entries) = availability_list.get(start..slice_end+1) {
-        shown_entries
-    } else {
-        log::error!("Cannot get availability entries slice");
-        send_msg(
-            bot.send_message(chat_id, "Error encountered while getting availability"),
-            username
-        ).await;
-        return Err(());
-    };
-    
-    let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
-        .filter_map(|role| if *role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
-        .collect();
+    let len = availability_list.len();
+    let start = min(start, len);
+    let slice_end = min(start + show, len);
+
+    let shown_entries = &availability_list[start..slice_end];
 
     let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries.into_iter()
         .filter_map(|entry| {
@@ -57,10 +46,10 @@ async fn display_user_availability(
             };
             // Format date as "MMM-DD" (3-letter month)
             let formatted = format!(
-                "{} {}: {}{}", 
+                "{} {}: {}{}",
                 option_str,
-                entry.avail.format("%b-%d").to_string(), 
-                entry.ict_type.as_ref(), 
+                entry.avail.format("%b-%d").to_string(),
+                entry.ict_type.as_ref(),
                 truncated_remarks
             );
             if entry.is_valid {
@@ -76,21 +65,20 @@ async fn display_user_availability(
     if start != 0 {
         pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
     }
-    if slice_end != availability_list.len()-1 {
+    if slice_end != availability_list.len() {
         pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
     }
     pagination.push(InlineKeyboardButton::callback("DONE", "DONE"));
 
-    entries.push(change_view_roles);
     entries.push(pagination);
-    
+
     let mut message = format!(
         "Availability for {}:\n",
         utils::escape_special_characters(&user_details.ops_name)
     );
 
     if availability_list.is_empty() {
-        message.push_str("No upcoming availability.\n");
+        message.push_str("No upcoming availability\\.\n");
     } else {
         for availability in availability_list {
             let date_str = availability.avail.format("%b %d, %Y").to_string();
@@ -129,7 +117,7 @@ async fn display_user_availability(
             .reply_markup(InlineKeyboardMarkup::new(entries)),
         username,
     ).await;
-    
+
     Ok(())
 }
 
@@ -145,17 +133,11 @@ async fn display_date_availability(
     start: usize,
     show: usize,
 ) -> Result<(), ()> {
-    let slice_end = min(start+show, availability_list.len()-1);
-    let shown_entries = if let Some(shown_entries) = availability_list.get(start..slice_end+1) {
-        shown_entries
-    } else {
-        log::error!("Cannot get availability entries slice");
-        send_msg(
-            bot.send_message(chat_id, "Error encountered while getting availability"),
-            username
-        ).await;
-        return Err(());
-    };
+    let len = availability_list.len();
+    let start = min(start, len);
+    let slice_end = min(start + show, len);
+
+    let shown_entries = &availability_list[start..slice_end];
 
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
         .filter_map(|role| if *role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
@@ -173,7 +155,7 @@ async fn display_date_availability(
             } else {
                 "".to_string()
             };
-            
+
             let formatted = format!(
                 "{} {}: {}{}",
                 option_str,
@@ -194,14 +176,14 @@ async fn display_date_availability(
     if start != 0 {
         pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
     }
-    if slice_end != availability_list.len()-1 {
+    if slice_end != availability_list.len() {
         pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
     }
     pagination.push(InlineKeyboardButton::callback("DONE", "DONE"));
 
     entries.push(change_view_roles);
     entries.push(pagination);
-    
+
     let date_str = selected_date.format("%b %d, %Y").to_string();
     let mut message = format!(
         "Users available on {}:\n",
@@ -209,7 +191,7 @@ async fn display_date_availability(
     );
 
     if availability_list.is_empty() {
-        message.push_str("No users available on this date.\n");
+        message.push_str("No users available on this date\\.\n");
     } else {
         for availability in availability_list {
             let ict_type_str = availability.ict_type.as_ref();
@@ -247,7 +229,7 @@ async fn display_date_availability(
             .reply_markup(InlineKeyboardMarkup::new(entries)),
         username,
     ).await;
-    
+
     Ok(())
 }
 
@@ -272,7 +254,6 @@ async fn handle_re_show_options(
                 username,
                 &user_details,
                 &availability_list,
-                &role_type,
                 &prefix,
                 start,
                 show
@@ -310,7 +291,7 @@ async fn handle_re_show_options(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -362,11 +343,11 @@ pub(super) async fn plan(
                             Ok(availability_list) => {
                                 // Display the user's availability
                                 handle_re_show_options(
-                                    &bot, &dialogue, &user.username, 
-                                    Some(user_details), 
-                                    None, 
-                                    availability_list, 
-                                    query_user_details.role_type, 
+                                    &bot, &dialogue, &user.username,
+                                    Some(user_details),
+                                    None,
+                                    availability_list,
+                                    query_user_details.role_type,
                                     prefix, 0, 8
                                 ).await?;
                             }
@@ -394,7 +375,7 @@ pub(super) async fn plan(
                             return Ok(());
                         }
                         // Show the available users on that day
-                        match controllers::scheduling::get_users_available_on_date(&pool, selected_date).await {
+                        match controllers::scheduling::get_users_available_by_role_on_date(&pool, selected_date, &query_user_details.role_type).await {
                             Ok(availability_list) => {
                                 // Display the availability for the selected date
                                 handle_re_show_options(&bot, &dialogue, &user.username, None, Some(selected_date), availability_list, query_user_details.role_type, prefix, 0, 8).await?;
@@ -428,18 +409,18 @@ pub(super) async fn plan_view(
     dialogue: MyDialogue,
     q: CallbackQuery,
     (
-        user_details, 
-        selected_date, 
-        availability_list, 
-        role_type, 
-        prefix, 
+        user_details,
+        selected_date,
+        availability_list,
+        role_type,
+        prefix,
         start
     ): (
-        Option<Usr>, 
-        Option<NaiveDate>, 
-        Vec<AvailabilityDetails>, 
-        RoleType, 
-        String, 
+        Option<Usr>,
+        Option<NaiveDate>,
+        Vec<AvailabilityDetails>,
+        RoleType,
+        String,
         usize
     ),
     pool: PgPool
@@ -488,12 +469,6 @@ pub(super) async fn plan_view(
                     role_type,
                     prefix, if start+8 < entries_len { start+8 } else { start }, 8
                 ).await?;
-            } else if option == "CANCEL" {
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
             } else if option == "DONE" {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Done."),
@@ -511,7 +486,7 @@ pub(super) async fn plan_view(
                                 match controllers::scheduling::toggle_planned_status(
                                     &pool,
                                     parsed_avail_uuid,
-                                    
+
                                 ).await {
                                     Ok(availability_details) => {
                                         send_msg(
@@ -548,14 +523,32 @@ pub(super) async fn plan_view(
                         // change role logic
                         match RoleType::from_str(&option) {
                             Ok(role_type_enum) => {
-                                handle_re_show_options(
-                                    &bot, &dialogue, &q.from.username,
-                                    user_details,
-                                    selected_date,
-                                    availability_list,
-                                    role_type_enum,
-                                    prefix, start, 8
-                                ).await?;
+                                match selected_date {
+                                    Some(selected_date) => {
+                                        // Show the available users on that day
+                                        match controllers::scheduling::get_users_available_by_role_on_date(&pool, selected_date, &role_type_enum).await {
+                                            Ok(new_availability_list) => {
+                                                // Display the availability for the selected date
+                                                handle_re_show_options(&bot, &dialogue, &q.from.username, None, Some(selected_date), new_availability_list, role_type_enum, prefix, 0, 8).await?;
+                                            }
+                                            Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+                                        }
+                                    }
+                                    None => {
+                                        send_msg(
+                                            bot.send_message(dialogue.chat_id(), "Invalid option."),
+                                            &q.from.username,
+                                        ).await;
+                                        handle_re_show_options(
+                                            &bot, &dialogue, &q.from.username,
+                                            user_details,
+                                            selected_date,
+                                            availability_list,
+                                            role_type,
+                                            prefix, start, 8
+                                        ).await?;
+                                    }
+                                }
                             }
                             Err(_) => {
                                 send_msg(

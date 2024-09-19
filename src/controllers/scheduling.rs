@@ -58,47 +58,74 @@ pub(crate) async fn edit_avail_by_uuid(
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
-        WITH update_statement AS (
+        WITH update_availability AS (
             UPDATE availability
             SET
-                planned = COALESCE($2, availability.planned),
-                ict_type = COALESCE($3, availability.ict_type),
-                remarks = COALESCE($4, availability.remarks),
-                is_valid = TRUE  -- Ensure that the availability is revalidated
-            WHERE availability.id = $1
-            RETURNING
-                availability.id,
-                avail,
-                planned,
-                ict_type,
-                remarks,
-                saf100,
-                attended,
-                is_valid,
-                availability.created,
-                availability.updated
+                planned = COALESCE($2, planned),
+                ict_type = COALESCE($3, ict_type),
+                remarks = COALESCE($4, remarks)
+            WHERE id = $1
+            RETURNING *
+        ),
+        notification_handling AS (
+            SELECT
+                update_availability.planned AS new_planned,
+                update_availability.id AS availability_id,
+                update_availability.avail AS avail_date
+            FROM update_availability
+        ),
+        invalidate_notifications AS (
+            UPDATE scheduled_notifications
+            SET is_valid = FALSE
+            WHERE avail_id = (SELECT availability_id FROM notification_handling)
+              AND sent = FALSE
+              AND (SELECT new_planned FROM notification_handling) = FALSE
+            RETURNING id
+        ),
+        schedule_notifications AS (
+            INSERT INTO scheduled_notifications (avail_id, scheduled_time)
+            SELECT
+                (SELECT availability_id FROM notification_handling),
+                times.scheduled_time
+            FROM (
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '9 hours'
+                    - INTERVAL '5 days' AS scheduled_time
+                UNION ALL
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '9 hours'
+                    - INTERVAL '2 days' AS scheduled_time
+            ) AS times
+            WHERE (SELECT new_planned FROM notification_handling) = TRUE
+            RETURNING id
+        ),
+        usr AS (
+            SELECT id, ops_name, usr_type
+            FROM usrs
+            WHERE id = (SELECT usr_id FROM update_availability)
         )
         SELECT
-            update_statement.id,
-            usrs.ops_name,
-            usrs.usr_type AS "usr_type: _",
-            update_statement.avail,
-            update_statement.planned,
-            update_statement.ict_type AS "ict_type: _",
-            update_statement.remarks,
-            update_statement.saf100,
-            update_statement.attended,
-            update_statement.is_valid,
-            update_statement.created,
-            update_statement.updated
-        FROM usrs
-        JOIN availability ON usrs.id = availability.usr_id
-        JOIN update_statement ON availability.id = $1;
+            update_availability.id,
+            usr.ops_name,
+            usr.usr_type AS "usr_type: _",
+            update_availability.avail,
+            update_availability.ict_type AS "ict_type: _",
+            update_availability.remarks,
+            update_availability.planned,
+            update_availability.saf100,
+            update_availability.attended,
+            update_availability.is_valid,
+            update_availability.created,
+            update_availability.updated
+        FROM update_availability
+        JOIN usr ON update_availability.usr_id = usr.id;
         "#,
         availability_id,
         planned,
         ict_type as _,
-        remarks
+        remarks,
     )
         .fetch_one(conn)
         .await;
@@ -122,37 +149,46 @@ pub(crate) async fn set_user_unavail(
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
-        WITH update_statement AS (
+        WITH update_availability AS (
             UPDATE availability
             SET is_valid = FALSE
-            WHERE availability.id = $1
-            RETURNING
-                id,
-                avail,
-                planned,
-                ict_type,
-                remarks,
-                saf100,
-                attended,
-                is_valid,
-                availability.created,
-                availability.updated,
-            usr_id
-        ) SELECT
-            update_statement.id,
-            usrs.ops_name,
-            usrs.usr_type AS "usr_type: _",
-            update_statement.avail,
-            update_statement.planned,
-            update_statement.ict_type AS "ict_type: _",
-            update_statement.remarks,
-            update_statement.saf100,
-            update_statement.attended,
-            update_statement.is_valid,
-            update_statement.created,
-            update_statement.updated
-            FROM update_statement
-            JOIN usrs ON update_statement.usr_id = usrs.id;
+            WHERE id = $1
+            RETURNING *
+        ),
+        notification_handling AS (
+            SELECT
+                update_availability.planned AS new_planned,
+                update_availability.id AS availability_id
+            FROM update_availability
+        ),
+        invalidate_notifications AS (
+            UPDATE scheduled_notifications
+            SET is_valid = FALSE
+            WHERE avail_id = (SELECT availability_id FROM notification_handling)
+              AND sent = FALSE
+              AND (SELECT new_planned FROM notification_handling) = FALSE
+            RETURNING id
+        ),
+        usr AS (
+            SELECT id, ops_name, usr_type
+            FROM usrs
+            WHERE id = (SELECT usr_id FROM update_availability)
+        )
+        SELECT
+            update_availability.id,
+            usr.ops_name,
+            usr.usr_type AS "usr_type: _",
+            update_availability.avail,
+            update_availability.ict_type AS "ict_type: _",
+            update_availability.remarks,
+            update_availability.planned,
+            update_availability.saf100,
+            update_availability.attended,
+            update_availability.is_valid,
+            update_availability.created,
+            update_availability.updated
+        FROM update_availability
+        JOIN usr ON update_availability.usr_id = usr.id;
         "#,
         availability_id
     )
@@ -165,7 +201,7 @@ pub(crate) async fn set_user_unavail(
             Ok(res)
         }
         Err(e) => {
-            log::error!("Error soft-deleting availability by id: {}", e);
+            log::error!("Error soft-deleting availability by id {}: {}", availability_id, e);
             Err(e)
         }
     }
@@ -326,68 +362,106 @@ pub(crate) async fn add_user_avail(
     date: NaiveDate,
     ict_type: &Ict,
     remarks: Option<String>,
-    planned: Option<bool>
+    planned: Option<bool>,
 ) -> Result<AvailabilityDetails, sqlx::Error> {
     let result = sqlx::query_as!(
         AvailabilityDetails,
         r#"
-        WITH insert_statement AS (
-            INSERT INTO availability (usr_id, avail, ict_type, remarks, planned)
-            SELECT usrs.id, $1, $2, $3, COALESCE($5, FALSE)  -- Use COALESCE to set planned to FALSE if None
+        WITH usr AS (
+            SELECT id, ops_name, usr_type
             FROM usrs
-            WHERE usrs.tele_id = $4
+            WHERE tele_id = $5
+        ),
+        upsert_availability AS (
+            INSERT INTO availability (usr_id, avail, ict_type, remarks, planned)
+            VALUES (
+                (SELECT id FROM usr),
+                $1,
+                $2,
+                $3,
+                COALESCE($4, FALSE)
+            )
             ON CONFLICT (usr_id, avail) DO UPDATE
                 SET
                     ict_type = EXCLUDED.ict_type,
                     remarks = COALESCE(EXCLUDED.remarks, availability.remarks),
-                    planned = COALESCE(EXCLUDED.planned, availability.planned),
-                    is_valid = TRUE -- Revalidate the availability
-            RETURNING
-                id,
-                usr_id,
-                avail,
-                ict_type,
-                remarks,
-                planned,  -- Return the planned field as well
-                saf100,
-                attended,
-                is_valid,
-                created,
-                updated
+                    planned = COALESCE(EXCLUDED.planned, availability.planned)
+            RETURNING *
+        ),
+        notification_handling AS (
+            SELECT
+                upsert_availability.planned AS new_planned,
+                upsert_availability.id AS availability_id,
+                upsert_availability.avail AS avail_date
+            FROM upsert_availability
+        ),
+        invalidate_notifications AS (
+            UPDATE scheduled_notifications
+            SET is_valid = FALSE
+            WHERE avail_id = (SELECT availability_id FROM notification_handling)
+              AND sent = FALSE
+              AND (SELECT new_planned FROM notification_handling) = FALSE
+            RETURNING id
+        ),
+        schedule_notifications AS (
+            INSERT INTO scheduled_notifications (avail_id, scheduled_time)
+            SELECT
+                (SELECT availability_id FROM notification_handling),
+                times.scheduled_time
+            FROM (
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '9 hours'  -- Set time to 09:00
+                    - INTERVAL '5 days' AS scheduled_time
+                UNION ALL
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '9 hours'
+                    - INTERVAL '2 days' AS scheduled_time
+            ) AS times
+            WHERE (SELECT new_planned FROM notification_handling) = TRUE
+            RETURNING id
         )
         SELECT
-            insert_statement.id,
-            usrs.ops_name,
-            usrs.usr_type AS "usr_type: _",
-            insert_statement.avail,
-            insert_statement.ict_type AS "ict_type: _",
-            insert_statement.remarks,
-            insert_statement.planned,  -- Include planned in the SELECT part
-            insert_statement.saf100,
-            insert_statement.attended,
-            insert_statement.is_valid,
-            insert_statement.created,
-            insert_statement.updated
-        FROM usrs
-        JOIN insert_statement ON usrs.id = insert_statement.usr_id
-        WHERE usrs.tele_id = $4;
+            upsert_availability.id,
+            usr.ops_name,
+            usr.usr_type AS "usr_type: _",
+            upsert_availability.avail,
+            upsert_availability.ict_type AS "ict_type: _",
+            upsert_availability.remarks,
+            upsert_availability.planned,
+            upsert_availability.saf100,
+            upsert_availability.attended,
+            upsert_availability.is_valid,
+            upsert_availability.created,
+            upsert_availability.updated
+        FROM upsert_availability
+        JOIN usr ON upsert_availability.usr_id = usr.id;
         "#,
         date,
         ict_type as _,
         remarks,
+        planned,
         tele_id as i64,
-        planned  // Pass the planned parameter to the query
     )
         .fetch_one(conn)
         .await;
 
     match result {
         Ok(res) => {
-            log::info!("Added or updated availability for tele_id: {} on {}", tele_id, date);
+            log::info!(
+                "Added or updated availability for tele_id: {} on {}",
+                tele_id,
+                date
+            );
             Ok(res)
         }
         Err(e) => {
-            log::error!("Error inserting or updating availability for tele_id {}: {}", tele_id, e);
+            log::error!(
+                "Error inserting or updating availability for tele_id {}: {}",
+                tele_id,
+                e
+            );
             Err(e)
         }
     }
@@ -491,9 +565,11 @@ pub(crate) async fn get_furthest_avail_date_for_role(
     }
 }
 
-pub(crate) async fn get_users_available_on_date(
+
+pub(crate) async fn get_users_available_by_role_on_date(
     conn: &PgPool,
     date: NaiveDate,
+    role_type: &RoleType,
 ) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
     let result = sqlx::query_as!(
         AvailabilityDetails,
@@ -514,10 +590,12 @@ pub(crate) async fn get_users_available_on_date(
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
         WHERE availability.avail = $1
-        AND (availability.is_valid = TRUE OR availability.planned = TRUE)
+          AND usrs.role_type = $2
+          AND (availability.is_valid = TRUE OR availability.planned = TRUE)
         ORDER BY usrs.ops_name ASC;
         "#,
-        date
+        date,
+        role_type as _  // Map RoleType enum
     )
         .fetch_all(conn)
         .await;
@@ -525,14 +603,20 @@ pub(crate) async fn get_users_available_on_date(
     match result {
         Ok(availability_list) => {
             log::info!(
-                "Found {} users available on {}",
+                "Found {} users with role {:?} available on {}",
                 availability_list.len(),
+                role_type,
                 date
             );
             Ok(availability_list)
         }
         Err(e) => {
-            log::error!("Error fetching users available on {}: {}", date, e);
+            log::error!(
+                "Error fetching users with role {:?} available on {}: {}",
+                role_type,
+                date,
+                e
+            );
             Err(e)
         }
     }

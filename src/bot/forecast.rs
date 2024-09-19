@@ -137,7 +137,7 @@ pub(super) async fn forecast_view(
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
-    log_endpoint_hit!(dialogue.chat_id(), "register_role", "Callback", q);
+    log_endpoint_hit!(dialogue.chat_id(), "forecast_view", "Callback", q);
 
     match q.data {
         None => {
