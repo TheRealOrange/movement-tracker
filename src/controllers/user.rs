@@ -1,7 +1,6 @@
-use crate::types::{Usr, RoleType, UsrType};
-use sqlx::PgPool;
-use teloxide::types::CountryCode::SO;
+use crate::types::{RoleType, Usr, UsrType};
 use sqlx::types::Uuid;
+use sqlx::PgPool;
 
 pub(crate) async fn user_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(

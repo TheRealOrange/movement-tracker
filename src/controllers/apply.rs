@@ -1,6 +1,6 @@
-use sqlx::{query_as, PgPool};
+use crate::types::{Apply, RoleType, UsrType};
 use sqlx::types::Uuid;
-use crate::types::{Apply, RoleType, Usr, UsrType};
+use sqlx::PgPool;
 
 pub(crate) async fn apply_user(
     conn: &PgPool,

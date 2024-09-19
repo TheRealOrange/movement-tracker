@@ -1,7 +1,7 @@
-use chrono::{NaiveDate, Datelike, Utc, Local};
+use chrono::{Datelike, Local, NaiveDate};
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
-use once_cell::sync::Lazy;
 
 static DAY_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^\s*(\d{1,2})(?:st|nd|rd|th)?[-/\s]+([A-Za-z]+|\d{1,2})(?:[-/\s]+(\d{2,4}))?\s*$").unwrap()

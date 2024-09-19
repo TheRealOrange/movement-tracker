@@ -1,19 +1,18 @@
 // implement functions used to provide a week forecast, a month forecast
 
-use std::ops::Add;
+use crate::bot::state::State;
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::types::{AvailabilityDetails, RoleType, UsrType};
+use crate::{controllers, log_endpoint_hit, utils};
+use chrono::{Duration, Local, NaiveDate};
+use sqlx::PgPool;
 use std::str::FromStr;
-use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
-use sqlx::{Error, PgPool};
-use strum::{IntoEnumIterator, ParseError};
-use teloxide::Bot;
+use strum::IntoEnumIterator;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message};
 use teloxide::requests::Requester;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit, utils};
-use crate::types::{Availability, AvailabilityDetails, RoleType, UsrType};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use teloxide::Bot;
 
 async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()

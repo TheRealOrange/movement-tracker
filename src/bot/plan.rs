@@ -1,21 +1,19 @@
-use std::cmp::{max, min};
-use std::str::FromStr;
+use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::state::State;
+use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
+use crate::{controllers, log_endpoint_hit, utils};
 use chrono::NaiveDate;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use sqlx::{Error, PgPool};
+use sqlx::PgPool;
+use std::cmp::{max, min};
+use std::str::FromStr;
 use strum::IntoEnumIterator;
-use teloxide::Bot;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use teloxide::Bot;
 use uuid::Uuid;
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit, utils};
-use crate::bot::state::State::AvailabilitySelect;
-use crate::bot::user::user;
-use crate::types::{Apply, Availability, AvailabilityDetails, RoleType, Usr, UsrType};
-use super::{handle_error, send_msg, HandlerResult, MyDialogue};
 
 // Helper function to display a user's availability
 async fn display_user_availability(
@@ -525,7 +523,7 @@ pub(super) async fn plan_view(
                                             )),
                                             &q.from.username,
                                         ).await;
-                                        dialogue.update(State::Start);
+                                        dialogue.update(State::Start).await?;
                                     }
                                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }

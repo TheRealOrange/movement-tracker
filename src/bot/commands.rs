@@ -1,10 +1,10 @@
-use sqlx::PgPool;
-use teloxide::{prelude::*, utils::command::BotCommands};
-use teloxide::types::ReplyParameters;
+use super::HandlerResult;
+use super::{send_msg, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit};
-use super::{send_msg, MyDialogue};
-use super::HandlerResult;
+use sqlx::PgPool;
+use teloxide::types::ReplyParameters;
+use teloxide::{prelude::*, utils::command::BotCommands};
 
 #[derive(BotCommands, Clone)]
 #[command(
@@ -96,7 +96,7 @@ pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgP
 pub(super) async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> HandlerResult {
     log_endpoint_hit!(dialogue.chat_id(), "cancel", "Command", msg);
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");

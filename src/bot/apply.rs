@@ -1,21 +1,19 @@
-use std::cmp::{max, min};
-use std::str::FromStr;
+use crate::bot::state::State;
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::types::{Apply, RoleType, UsrType};
+use crate::{controllers, log_endpoint_hit};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use sqlx::types::Uuid;
 use sqlx::PgPool;
-use teloxide::Bot;
+use std::cmp::{max, min};
+use std::str::FromStr;
+use strum::IntoEnumIterator;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message};
 use teloxide::requests::Requester;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use sqlx::types::Uuid;
-use strum::IntoEnumIterator;
-use teloxide::dispatching::dialogue::InMemStorageError;
-use uuid::Error;
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit};
-use crate::types::{Apply, RoleType, Usr, UsrType};
+use teloxide::Bot;
 
 async fn display_applications(
     bot: &Bot,

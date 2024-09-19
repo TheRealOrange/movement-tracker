@@ -1,4 +1,4 @@
-use crate::types::{AvailabilityDetails, Usr};
+use crate::types::AvailabilityDetails;
 use sqlx::types::chrono::NaiveDate;
 use sqlx::PgPool;
 

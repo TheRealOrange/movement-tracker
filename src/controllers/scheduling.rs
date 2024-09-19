@@ -1,8 +1,8 @@
+use crate::types::{Availability, AvailabilityDetails, Ict, RoleType};
 use chrono::Local;
-use crate::types::{Availability, AvailabilityDetails, Ict, RoleType, Usr};
-use sqlx::types::chrono::{NaiveDate, Utc};
-use sqlx::PgPool;
+use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
+use sqlx::PgPool;
 
 async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(

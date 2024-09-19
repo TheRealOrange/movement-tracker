@@ -1,16 +1,15 @@
-use std::str::FromStr;
+use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::state::State;
+use crate::types::{RoleType, UsrType};
+use crate::{controllers, log_endpoint_hit};
 use sqlx::PgPool;
-use strum::{IntoEnumIterator, ParseError};
-use teloxide::Bot;
-use teloxide::prelude::Message;
-use teloxide::dispatching::dialogue::{GetChatId, InMemStorageError};
+use std::str::FromStr;
+use strum::IntoEnumIterator;
 use teloxide::payloads::SendMessageSetters;
+use teloxide::prelude::Message;
 use teloxide::requests::Requester;
 use teloxide::types::{CallbackQuery, ChatId, InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit};
-use crate::types::{RoleType, UsrType};
-use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use teloxide::Bot;
 
 async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
     let roles = RoleType::iter()

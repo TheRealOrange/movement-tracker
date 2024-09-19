@@ -1,14 +1,14 @@
+use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::state::State;
+use crate::types::{Usr, UsrType};
+use crate::{controllers, log_endpoint_hit};
+use sqlx::PgPool;
 use std::str::FromStr;
-use sqlx::{Error, PgPool};
 use strum::IntoEnumIterator;
-use teloxide::Bot;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit};
-use crate::types::{Apply, RoleType, Usr, UsrType};
-use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use teloxide::Bot;
 
 async fn display_user_edit_prompt(
     bot: &Bot,

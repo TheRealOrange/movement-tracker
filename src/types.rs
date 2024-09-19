@@ -1,9 +1,8 @@
-use std::fmt;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgHasArrayType, PgTypeInfo};
 use sqlx::types::chrono::{DateTime, NaiveDate, Utc};
-use strum_macros::{AsRefStr, EnumIter, EnumString};
 use sqlx::types::Uuid;
+use strum_macros::{AsRefStr, EnumIter, EnumString};
 
 #[derive(Clone, Debug, sqlx::Type, Eq, PartialEq, Serialize, Deserialize, EnumString, EnumIter, AsRefStr)]
 #[sqlx(type_name = "user_type_enum", rename_all = "lowercase")]

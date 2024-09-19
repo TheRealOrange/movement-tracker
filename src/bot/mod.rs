@@ -1,13 +1,12 @@
+use crate::bot::state::schema;
 use sqlx::PgPool;
-use teloxide::{Bot, dptree};
+use state::State;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::Dispatcher;
-use teloxide::payloads::{SendMessage, SendMessageSetters};
+use teloxide::payloads::SendMessage;
 use teloxide::prelude::{ChatId, Dialogue, Requester};
 use teloxide::requests::JsonRequest;
-use teloxide::types::MessageId;
-use state::State;
-use crate::bot::state::schema;
+use teloxide::{dptree, Bot};
 
 pub(self) mod commands;
 pub(self) mod user;

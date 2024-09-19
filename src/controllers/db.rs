@@ -1,8 +1,7 @@
 use sqlx::migrate::MigrateDatabase;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Pool, Postgres};
+use sqlx::{PgPool, Postgres};
 use std::env;
-use std::env::VarError;
 use std::error::Error;
 
 pub(crate) async fn init_db() -> Result<PgPool, Box<dyn Error>> {

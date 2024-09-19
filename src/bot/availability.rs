@@ -1,22 +1,18 @@
-use std::any::Any;
-use std::cmp::{max, min};
-use std::str::FromStr;
-use chrono::NaiveDateTime;
+use crate::bot::state::State;
+use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::types::{Availability, AvailabilityDetails, Ict};
+use crate::{controllers, log_endpoint_hit, utils};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use sqlx::{Error, PgPool};
 use sqlx::types::chrono::NaiveDate;
-use strum::{IntoEnumIterator, ParseError};
-use teloxide::Bot;
+use sqlx::PgPool;
+use std::cmp::{max, min};
+use std::str::FromStr;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::prelude::{CallbackQuery, ChatId, Message, Requester};
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::Bot;
 use uuid::Uuid;
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
-use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit, utils};
-use crate::bot::state::State::{AvailabilityModify, AvailabilitySelect};
-use crate::types::{Apply, Availability, AvailabilityDetails, Ict, Usr, UsrType};
 
 async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
@@ -150,7 +146,7 @@ async fn handle_re_show_options(
         Err(_) => dialogue.update(State::ErrorState).await?,
         Ok(_) => {
             log::debug!("Transitioning to AvailabilitySelect with Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", availability_list, action, prefix, start);
-            dialogue.update(AvailabilitySelect { availability_list, action, prefix, start }).await?;
+            dialogue.update(State::AvailabilitySelect { availability_list, action, prefix, start }).await?;
         }
     };
     Ok(())
