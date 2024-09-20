@@ -89,7 +89,7 @@ async fn update_dm_config_notification(bot: &Bot, chat_id: ChatId, message_id: &
         Ok(_) => {}
         Err(e) => {
             log::error!(
-                "Error replying to msg from user: {}, error: {}",
+                "Error editing msg in response to user: {}, error: {}",
                 username.as_deref().unwrap_or("none"),
                 e
             );

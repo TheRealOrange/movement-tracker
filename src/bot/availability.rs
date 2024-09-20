@@ -10,7 +10,88 @@ use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+
+fn get_availability_edit_keyboard(
+    availability: &Vec<Availability>,
+    prefix: &String,
+    start: usize,
+    show: usize,
+) -> Result<InlineKeyboardMarkup, ()> {
+    let slice_end = min(start + show, availability.len());
+    let shown_entries = match availability.get(start..slice_end) {
+        Some(entries) => entries,
+        None => {
+            log::error!("Cannot get availability entries slice");
+            return Err(());
+        }
+    };
+
+    let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries
+        .iter()
+        .filter_map(|entry| {
+            let truncated_remarks = if let Some(remarks) = &entry.remarks {
+                if remarks.len() > 8 {
+                    format!(", {}...", &remarks[0..8])
+                } else {
+                    format!(", {}", remarks)
+                }
+            } else {
+                "".to_string()
+            };
+
+            // Format date as "MMM-DD" (3-letter month)
+            let formatted = format!(
+                "{}: {}{}",
+                entry.avail.format("%b-%d"),
+                entry.ict_type.as_ref(),
+                truncated_remarks
+            );
+
+            if entry.is_valid {
+                Some(vec![InlineKeyboardButton::callback(
+                    formatted,
+                    format!("{}{}", prefix, entry.id),
+                )])
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Add "PREV", "NEXT", and "DONE" buttons
+    let mut pagination = Vec::new();
+    if start > 0 {
+        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+    }
+    if slice_end < availability.len() {
+        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
+    }
+    pagination.push(InlineKeyboardButton::callback("DONE", "DONE"));
+
+    // Combine entries with pagination
+    entries.push(pagination);
+
+    Ok(InlineKeyboardMarkup::new(entries))
+}
+
+fn get_availability_edit_text(
+    availability: &Vec<Availability>,
+    start: usize,
+    show: usize,
+    action: &String,
+) -> String {
+    // Prepare the message text
+    let slice_end = min(start + show, availability.len());
+    let message_text = format!(
+        "Showing availability {} to {}, choose one to {}",
+        start + 1,
+        slice_end,
+        action.to_lowercase()
+    );
+
+    message_text
+}
 
 async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
@@ -74,59 +155,91 @@ async fn display_availability_edit(
     start: usize,
     show: usize,
     action: &String
-) -> Result<(), ()> {
-    let slice_end = min(start+show, availability.len()-1);
-    let shown_entries = if let Some(shown_entries) = availability.get(start..slice_end+1) {
-        shown_entries
-    } else {
-        log::error!("Cannot get availability entries slice");
-        send_msg(
-            bot.send_message(chat_id, "Error encountered while getting availability"),
-            username
-        ).await;
-        return Err(());
+) -> Result<MessageId, ()> {
+    // Generate the inline keyboard
+    let markup = match get_availability_edit_keyboard(availability, prefix, start, show) {
+        Ok(kb) => kb,
+        Err(_) => {
+            send_msg(
+                bot.send_message(chat_id, "Error encountered while getting availability."),
+                username,
+            ).await;
+            return Err(());
+        }
     };
 
-    let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries.into_iter()
-        .filter_map(|entry| {
-            let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.len() > 8 {
-                    format!(", {}...", &remarks[0..8])
-                } else {
-                    format!(", {}", &remarks)
-                }
-            } else {
-                "".to_string()
-            };
-            // Format date as "MMM-DD" (3-letter month)
-            let formatted = format!("{}: {}{}", entry.avail.format("%b-%d").to_string(), entry.ict_type.as_ref(), truncated_remarks);
-            if entry.is_valid {
-                Some(vec![InlineKeyboardButton::callback(formatted, prefix.to_owned() + &entry.id.to_string())])
-            } else {
-                None
-            }
-        })
-        .collect();
+    // Generate the message text
+    let message_text = get_availability_edit_text(availability, start, show, action);
 
-    // Add "NEXT" and "PREV" buttons
-    let mut pagination = Vec::new();
-    if start != 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
-    }
-    if slice_end != availability.len()-1 {
-        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
-    }
-    pagination.push(InlineKeyboardButton::callback("DONE", "DONE"));
-
-    // Combine entries with pagination
-    entries.push(pagination);
-
-    send_msg(
-        bot.send_message(chat_id, format!("Showing availability {} to {}, choose one to {}", start+1, slice_end+1, action.to_lowercase()))
-            .reply_markup(InlineKeyboardMarkup::new(entries)),
+    // Send the message and capture the MessageId
+    match send_msg(
+        bot.send_message(chat_id, message_text)
+            .reply_markup(markup),
         username
-    ).await;
+    ).await {
+        Some(msg_id) => Ok(msg_id),
+        None => Err(())
+    }
+}
 
+async fn update_availability_edit(
+    bot: &Bot,
+    chat_id: ChatId,
+    username: &Option<String>,
+    availability: &Vec<Availability>,
+    prefix: &String,
+    start: usize,
+    show: usize,
+    action: &String,
+    msg_id: &MessageId
+) -> Result<(), ()> {
+    // Generate the inline keyboard
+    let markup = match get_availability_edit_keyboard(availability, prefix, start, show) {
+        Ok(kb) => kb,
+        Err(_) => {
+            send_msg(
+                bot.send_message(chat_id, "Error encountered while getting availability."),
+                username,
+            ).await;
+            return Err(());
+        }
+    };
+
+    // Edit both text and reply markup in one call
+    match bot.edit_message_text(chat_id, *msg_id, get_availability_edit_text(availability, start, show, action))
+        .reply_markup(markup)
+        .await {
+        Ok(_) => {}
+        Err(e) => {
+            log::error!(
+                "Error editing msg in response to user: {}, error: {}",
+                username.as_deref().unwrap_or("none"),
+                e
+            );
+        }
+    };
+
+    Ok(())
+}
+
+async fn handle_show_options(
+    bot: &Bot,
+    dialogue: &MyDialogue,
+    username: &Option<String>,
+    availability_list: Vec<Availability>,
+    prefix: String,
+    start: usize,
+    show: usize,
+    action: String,
+) -> HandlerResult {
+    match display_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action)
+        .await {
+        Err(_) => dialogue.update(State::ErrorState).await?,
+        Ok(msg_id) => {
+            log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
+            dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?;
+        }
+    }
     Ok(())
 }
 
@@ -138,13 +251,14 @@ async fn handle_re_show_options(
     prefix: String,
     start: usize,
     show: usize,
-    action: String
+    action: String,
+    msg_id: MessageId
 ) -> HandlerResult {
-    match display_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action).await {
+    match update_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action, &msg_id).await {
         Err(_) => dialogue.update(State::ErrorState).await?,
         Ok(_) => {
-            log::debug!("Transitioning to AvailabilitySelect with Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", availability_list, action, prefix, start);
-            dialogue.update(State::AvailabilitySelect { availability_list, action, prefix, start }).await?;
+            log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
+            dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?;
         }
     };
     Ok(())
@@ -312,7 +426,7 @@ async fn handle_go_back(
                 dialogue.update(State::AvailabilityView { availability_list }).await?;
             } else {
                 let new_start = if start >= availability_list.len() { max(0, availability_list.len() - show) } else { start };
-                handle_re_show_options(bot, dialogue, username, availability_list, prefix, new_start, show, action).await?;
+                handle_show_options(bot, dialogue, username, availability_list, prefix, new_start, show, action).await?;
             }
         }
         Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
@@ -484,7 +598,7 @@ pub(super) async fn availability_view(
                 dialogue.update(State::AvailabilityAdd { avail_type }).await?
             } else if option == "MODIFY" || option == "DELETE" {
                 let action = option.clone();
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action).await?;
+                handle_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action).await?;
             } else if option == "DONE" {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Returned to start."),
@@ -712,12 +826,13 @@ pub(super) async fn availability_add_complete(
 pub(super) async fn availability_select(
     bot: Bot,
     dialogue: MyDialogue,
-    (availability_list, action, prefix, start): (Vec<Availability>, String, String, usize),
+    (msg_id, availability_list, action, prefix, start): (MessageId, Vec<Availability>, String, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify", "Callback", q,
+        "MessageId" => msg_id,
         "Availability" => availability_list,
         "Action" => action,
         "Prefix" => prefix,
@@ -730,14 +845,14 @@ pub(super) async fn availability_select(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, msg_id).await?;
         }
         Some(option) => {
             if option == "PREV" {
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start-8), 8, action).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start-8), 8, action, msg_id).await?;
             } else if option == "NEXT" {
                 let entries_len = availability_list.len();
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, msg_id).await?;
             } else if option == "CANCEL" {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Operation cancelled."),
@@ -752,7 +867,7 @@ pub(super) async fn availability_select(
                 dialogue.update(State::Start).await?
             } else {
                 match option.strip_prefix(&prefix) {
-                    None => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?,
+                    None => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, msg_id).await?,
                     Some(id) => {
                         match Uuid::try_parse(&id) {
                             Ok(parsed_id) => {
@@ -771,7 +886,7 @@ pub(super) async fn availability_select(
                                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }
                             }
-                            Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?,
+                            Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, msg_id).await?,
                         }
                     }
                 }
@@ -817,7 +932,7 @@ pub(super) async fn availability_modify(
             } else if option == "DELETE" {
                 delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool).await?;
             } else if option == "BACK" {
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?;
+                handle_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?;
             }
         }
     }

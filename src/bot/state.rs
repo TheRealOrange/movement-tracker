@@ -83,6 +83,7 @@ pub(super) enum State {
         availability_list: Vec<Availability>
     },
     AvailabilitySelect {
+        msg_id: MessageId,
         availability_list: Vec<Availability>,
         action: String,
         prefix: String,
@@ -215,7 +216,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
         )
         .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
-        .branch(case![State::AvailabilitySelect { availability_list, action, prefix, start }].endpoint(availability_select))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
         .branch(case![State::AvailabilityModify { availability_entry, availability_list, action, prefix, start }].endpoint(availability_modify))
         .branch(case![State::AvailabilityModifyType { availability_entry, action, start }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_callback))

@@ -40,7 +40,7 @@ pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<Str
         Ok(msg) => { Some(msg.id) }
         Err(e) => {
             log::error!(
-                "Error replying to msg from user: {}, error: {}",
+                "Error responding to msg from user: {}, error: {}",
                 username.as_deref().unwrap_or("none"),
                 e
             );
