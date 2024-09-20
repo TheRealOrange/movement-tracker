@@ -854,7 +854,7 @@ pub(super) async fn availability_select(
         }
         Some(option) => {
             if option == "PREV" {
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start-8), 8, action, msg_id).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 -8) as usize, 8, action, msg_id).await?;
             } else if option == "NEXT" {
                 let entries_len = availability_list.len();
                 handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, msg_id).await?;

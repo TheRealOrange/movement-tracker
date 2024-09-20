@@ -705,7 +705,7 @@ pub(super) async fn plan_view(
                     selected_date,
                     availability_list,
                     role_type,
-                    prefix, max(0, start-8), 8,
+                    prefix, max(0, start as i64 - 8) as usize, 8,
                     msg_id
                 ).await?;
             } else if option == "NEXT" {
@@ -797,7 +797,7 @@ pub(super) async fn plan_view(
                                             }
                                         };
 
-                                        let newstart = if start < availability_list.len()-1 { start } else { max(start-8, 0) };
+                                        let newstart = if start < availability_list.len()-1 { start } else { max(start as i64 - 8, 0) as usize };
                                         handle_re_show_options(
                                             &bot, &dialogue, &q.from.username,
                                             user_details,
