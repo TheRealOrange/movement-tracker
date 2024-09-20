@@ -365,80 +365,128 @@ pub(super) async fn apply_edit_prompt(
 
     match q.data {
         None => {
+            // Invalid option selected
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
-            ).await;
+            )
+                .await;
             display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
         }
-        Some(option) => {
-            match option.as_str() {
-                "DONE" => {
-                    match controllers::apply::remove_apply_by_uuid(&pool, application.id)
-                        .await {
-                        Ok(_) => {
-                            match controllers::user::add_user(
-                                &pool,
-                                application.tele_id as u64,
-                                application.name,
-                                application.ops_name,
-                                application.role_type,
-                                application.usr_type,
-                                admin
-                            ).await {
-                                Ok(user) => {
+        Some(option) => match option.as_str() {
+            "DONE" => {
+                // Remove the application
+                match controllers::apply::remove_apply_by_uuid(&pool, application.id).await {
+                    Ok(_) => {
+                        // Add the user to the database
+                        match controllers::user::add_user(
+                            &pool,
+                            application.tele_id as u64,
+                            application.name,
+                            application.ops_name,
+                            application.role_type,
+                            application.usr_type,
+                            admin,
+                        )
+                            .await
+                        {
+                            Ok(user) => {
+                                // If the user is an admin, configure default notification settings
+                                if admin {
+                                    // Set default notification settings
+                                    match controllers::notifications::update_notification_settings(
+                                        &pool,
+                                        user.tele_id as i64, // Assuming chat_id == tele_id
+                                        Some(true),  // notif_system
+                                        Some(true),  // notif_register
+                                        None,        // notif_availability
+                                        Some(true),  // notif_plan
+                                        Some(true),  // notif_conflict
+                                    ).await
+                                    {
+                                        Ok(_) => {
+                                            log::info!("Default notification settings configured for admin user {}", &user.name);
+                                        }
+                                        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+                                    }
+
+                                    // Inform the admin about notification settings
                                     send_msg(
-                                        bot.send_message(dialogue.chat_id(), format!(
-                                            "Added user\nNAME: {}\nOPS NAME: {}",
-                                            user.name, user.ops_name
-                                        )),
+                                        bot.send_message(ChatId(user.tele_id),
+                                            "Registered successfully as admin with default notification settings enabled. You can configure your notifications using /notify.", ),
                                         &q.from.username,
                                     ).await;
-
-                                    dialogue.update(State::Start).await?;
+                                } else {
+                                    // Inform regular users
+                                    send_msg(
+                                        bot.send_message(ChatId(user.tele_id),
+                                            "Registered successfully. Use /help to see available actions.", ),
+                                        &q.from.username,
+                                    ).await;
                                 }
-                                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+
+                                send_msg(
+                                    bot.send_message(dialogue.chat_id(), "Done."),
+                                    &q.from.username,
+                                ).await;
+                                dialogue.update(State::Start).await?;
+                            }
+                            Err(e) => {
+                                log::error!("Error adding user: {}", e);
+                                handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                             }
                         }
-                        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+                    }
+                    Err(e) => {
+                        log::error!("Error removing application by UUID {}: {}", application.id, e);
+                        handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                     }
                 }
-                "CANCEL" => {
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                        &q.from.username,
-                    ).await;
-                    dialogue.update(State::Start).await?
-                }
-                "NAME" => {
-                    display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await;
-                    dialogue.update(State::ApplyEditName { application, admin }).await?;
-                }
-                "OPS NAME" => {
-                    display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await;
-                    dialogue.update(State::ApplyEditOpsName { application, admin }).await?;
-                }
-                "ROLE" => {
-                    display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
-                    dialogue.update(State::ApplyEditRole { application, admin }).await?;
-                }
-                "TYPE" => {
-                    display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
-                    dialogue.update(State::ApplyEditType { application, admin }).await?;
-                }
-                "ADMIN" => {
-                    display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;
-                    dialogue.update(State::ApplyEditAdmin { application, admin }).await?;
-                }
-                _ => {
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Invalid option."),
-                        &q.from.username,
-                    ).await;
-                    display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
-                }
             }
-        }
+            "CANCEL" => {
+                // Operation cancelled
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
+                    &q.from.username,
+                )
+                    .await;
+                dialogue.update(State::Start).await?
+            }
+            "NAME" => {
+                // Edit name
+                display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await;
+                dialogue.update(State::ApplyEditName { application, admin }).await?;
+            }
+            "OPS NAME" => {
+                // Edit OPS name
+                display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await;
+                dialogue.update(State::ApplyEditOpsName { application, admin }).await?;
+            }
+            "ROLE" => {
+                // Edit role
+                display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
+                dialogue.update(State::ApplyEditRole { application, admin }).await?;
+            }
+            "TYPE" => {
+                // Edit user type
+                display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
+                dialogue.update(State::ApplyEditType { application, admin }).await?;
+            }
+            "ADMIN" => {
+                // Edit admin status
+                display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;
+                dialogue.update(State::ApplyEditAdmin { application, admin }).await?;
+            }
+            _ => {
+                // Handle any other invalid options
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "Invalid option."),
+                    &q.from.username,
+                )
+                    .await;
+                display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
+            }
+        },
     }
 
     Ok(())

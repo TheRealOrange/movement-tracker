@@ -265,3 +265,34 @@ pub(crate) async fn get_conflict_notifications_enabled(conn: &PgPool) -> Result<
         }
     }
 }
+
+pub(crate) async fn soft_delete_notification_settings(
+    conn: &PgPool,
+    chat_id: i64,
+) -> Result<(), sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE notification_settings
+        SET is_valid = FALSE
+        WHERE chat_id = $1 AND is_valid = TRUE;
+        "#,
+        chat_id
+    )
+        .execute(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            if res.rows_affected() > 0 {
+                log::info!("Soft deleted notification settings for chat_id: {}", chat_id);
+            } else {
+                log::info!("No active notification settings found to soft delete for chat_id: {}", chat_id);
+            }
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("Error soft deleting notification settings for chat_id {}: {}", chat_id, e);
+            Err(e)
+        }
+    }
+}

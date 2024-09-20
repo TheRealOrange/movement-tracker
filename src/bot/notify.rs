@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use sqlx::PgPool;
+use sqlx::{Error, PgPool};
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
@@ -248,6 +248,28 @@ pub(super) async fn notify_settings(
                         }
                         dialogue.update(State::Start).await?;
                         return Ok(());
+                    } else if option == "DISABLE ALL" {
+                        match controllers::notifications::soft_delete_notification_settings(&pool, chat_id.0).await {
+                            Ok(_) => {
+                                send_msg(
+                                    bot.send_message(dialogue.chat_id(), "Notifications disabled"),
+                                    &q.from.username,
+                                ).await;
+
+                                if dialogue.chat_id() != chat_id {
+                                    send_msg(
+                                        bot.send_message(chat_id, format!(
+                                            "@{} has disabled notifications",
+                                            &q.from.username.as_deref().unwrap_or("none")
+                                        )),
+                                        &q.from.username,
+                                    ).await;
+                                }
+                                dialogue.update(State::Start).await?;
+                                return Ok(());
+                            }
+                            Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+                        }
                     } else if option == "SYSTEM" {
                         notification_settings.notif_system = !notification_settings.notif_system;
                     } else if option == "REGISTER" {
