@@ -7,7 +7,7 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::{dialogue, UpdateHandler};
 use teloxide::dptree::{case, endpoint};
 use teloxide::prelude::*;
-use teloxide::types::{MessageId, ReplyParameters};
+use teloxide::types::{Me, MessageId, ReplyParameters};
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
@@ -125,6 +125,7 @@ pub(super) enum State {
     },
     // States meant for planning SANS for flight
     PlanView {
+        msg_id: MessageId,
         user_details: Option<Usr>,
         selected_date: Option<NaiveDate>,
         availability_list: Vec<AvailabilityDetails>,
@@ -212,7 +213,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditType { user_details }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
-            .branch(case![State::PlanView { user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
+            .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
             .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
         )
         .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
