@@ -736,20 +736,21 @@ pub(super) async fn plan_view(
                                 match controllers::scheduling::toggle_planned_status(
                                     &pool,
                                     parsed_avail_uuid,
-
                                 ).await {
                                     Ok(availability_details) => {
                                         // notify planned
                                         notifier::emit::plan_notifications(
                                             &bot,
                                             format!(
-                                                "{}{} has been planned for {} on {}",
+                                                "{}{} {} for {} on {}",
                                                 availability_details.ops_name,
                                                 if availability_details.usr_type == UsrType::NS {" (NS)"} else {""},
+                                                if availability_details.planned { "has been planned" } else { "is no longer planned" },
                                                 availability_details.ict_type.as_ref(),
                                                 availability_details.avail.format("%Y-%m-%d")
                                             ).as_str(),
                                             &pool,
+                                            q.from.id.0 as i64
                                         ).await;
 
                                         send_msg(

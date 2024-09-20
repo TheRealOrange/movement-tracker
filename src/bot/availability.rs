@@ -369,6 +369,7 @@ async fn delete_availability_entry_and_go_back(
                                 details.avail.format("%Y-%m-%d")
                             ).as_str(),
                             &pool,
+                            tele_id as i64
                         ).await;
 
                         // detect conflicts and notify
@@ -470,6 +471,7 @@ async fn modify_availability_and_go_back(
                                 if updated.remarks.is_some() { "\nRemarks: ".to_owned()+updated.remarks.as_deref().unwrap_or("none") } else { "".to_string() }
                             ).as_str(),
                             &pool,
+                            tele_id as i64
                         ).await;
 
                         send_msg(
@@ -535,6 +537,7 @@ async fn register_availability(
                 if remarks.is_some() { "\nRemarks: ".to_owned()+remarks.as_deref().unwrap_or("\nnone") } else { "".to_string() }
             ).as_str(),
             &pool,
+            tele_id as i64
         ).await;
 
         send_msg(

@@ -168,10 +168,16 @@ pub(super) async fn forecast_view(
                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                 }
             } else if option == "DONE" {
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Returning to start."),
-                    &q.from.username,
-                ).await;
+                // Edit the existing message to remove the inline keyboard
+                if let Some(message) = q.message {
+                    if let Err(e) = bot.edit_message_reply_markup(dialogue.chat_id(), message.id()).await {
+                        log::error!("Failed to edit message reply markup: {}", e);
+                        handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
+                        return Ok(());
+                    }
+                } else {
+                    log::warn!("No message found in CallbackQuery for 'DONE' option.");
+                }
                 dialogue.update(State::Start).await?;
                 return Ok(());
             } else {

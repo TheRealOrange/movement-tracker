@@ -7,7 +7,7 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::{dialogue, UpdateHandler};
 use teloxide::dptree::{case, endpoint};
 use teloxide::prelude::*;
-use teloxide::types::{MessageId, ReplyParameters};
+use teloxide::types::{ChatKind, MessageId, ReplyParameters};
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
@@ -168,18 +168,18 @@ pub(super) enum State {
 pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Commands, _>()
         .branch(case![Commands::Help].endpoint(help))
-        .branch(case![Commands::Register].endpoint(register))
+        .branch(case![Commands::Register].branch(dptree::filter_async(check_private).endpoint(register)))
         .branch(dptree::filter_async(check_registered)
-            .branch(case![Commands::Availability].endpoint(availability))
             .branch(case![Commands::Forecast].endpoint(forecast))
-            .branch(case![Commands::Upcoming].endpoint(upcoming))
+            .branch(case![Commands::Availability].branch(dptree::filter_async(check_private).endpoint(availability)))
+            .branch(case![Commands::Upcoming].branch(dptree::filter_async(check_private).endpoint(upcoming)))
         )
         .branch(case![Commands::Cancel].endpoint(cancel));
 
     let admin_command_handler = teloxide::filter_command::<PrivilegedCommands, _>()
-        .branch(case![PrivilegedCommands::User { ops_name }].endpoint(user))
-        .branch(case![PrivilegedCommands::Approve].endpoint(approve))
-        .branch(case![PrivilegedCommands::Plan { ops_name_or_date }].endpoint(plan))
+        .branch(case![PrivilegedCommands::User { ops_name }].branch(dptree::filter_async(check_private).endpoint(user)))
+        .branch(case![PrivilegedCommands::Approve].branch(dptree::filter_async(check_private).endpoint(approve)))
+        .branch(case![PrivilegedCommands::Plan { ops_name_or_date }].branch(dptree::filter_async(check_private).endpoint(plan)))
         .branch(case![PrivilegedCommands::Notify].endpoint(notify));
 
     let message_handler = Update::filter_message()
@@ -207,6 +207,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::RegisterType { role_type }].endpoint(register_type))
         .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete))
         .branch(dptree::filter_async(check_admin_callback)
+            .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
             .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(apply_view))
             .branch(case![State::ApplyEditPrompt { application, admin }].endpoint(apply_edit_prompt))
             .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
@@ -217,7 +218,6 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
-            .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
         )
         .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
@@ -244,6 +244,28 @@ async fn reply_server_overloaded(bot: &Bot, msg: &Message) {
             _ => &None
         }
     ).await;
+}
+
+async fn check_private(bot: Bot, msg: Message) -> bool {
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(ref user) = msg.from {
+        user
+    } else {
+        return false;
+    };
+
+    // Determine the kind of chat the message was sent in
+    match &msg.chat.kind {
+        ChatKind::Private(_) => true, // Private chat
+        ChatKind::Public(_) => {
+            send_msg(
+                bot.send_message(user.id, format!("Please send {} as a private message only", msg.text().unwrap_or("your message"))),
+                &(user.username)
+            ).await;
+            false
+        }, // Group, Supergroup, or Channel
+        _ => false, // Fallback for any other chat types
+    }
 }
 
 async fn check_registered(bot: Bot, msg: Message, pool: PgPool) -> bool {
