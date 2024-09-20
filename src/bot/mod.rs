@@ -18,6 +18,7 @@ pub(self) mod availability;
 pub(self) mod forecast;
 pub(self) mod notify;
 pub(self) mod plan;
+pub(self) mod upcoming;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;

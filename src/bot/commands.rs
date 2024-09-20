@@ -18,6 +18,8 @@ pub(super) enum Commands {
     Register,
     #[command(description = "Indicate your availability (for SANS)")]
     Availability,
+    #[command(description = "View upcoming planned")]
+    Upcoming,
     // #[command(description = "Add information about your movement")]
     // Movement,
     #[command(description = "View information about the future availability")]

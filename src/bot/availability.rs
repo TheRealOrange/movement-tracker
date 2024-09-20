@@ -40,10 +40,13 @@ fn get_availability_edit_keyboard(
                 "".to_string()
             };
 
+            let is_planned_str = if entry.planned { " (PLAN) " } else { "" };
+
             // Format date as "MMM-DD" (3-letter month)
             let formatted = format!(
-                "{}: {}{}",
+                "{}: {}{}{}",
                 entry.avail.format("%b-%d"),
+                is_planned_str,
                 entry.ict_type.as_ref(),
                 truncated_remarks
             );
@@ -127,9 +130,11 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             let formatted_date = availability.avail.format("%b-%d").to_string();
             
             let state = if availability.is_valid == false && availability.planned == true {
-                " (UNAVAIL, PLANNED) "
+                " (UNAVAIL, PLANNED)"
             } else {
-                ""
+                if availability.planned {
+                    " (PLANNED)"
+                } else { "" }
             };
 
             output_text.push_str(&format!(

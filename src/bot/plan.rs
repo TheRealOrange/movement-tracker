@@ -5,7 +5,7 @@ use crate::{controllers, log_endpoint_hit, notifier, utils};
 use chrono::NaiveDate;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use sqlx::{Error, PgPool};
+use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
@@ -33,7 +33,7 @@ fn get_user_availability_keyboard(
         .iter()
         .map(|entry| {
             let option_str = if entry.planned {
-                if entry.is_valid { "UNPLAN" } else { "UNPLAN *(UNAVAIL)*" }
+                if entry.is_valid { "UNPLAN" } else { "UNPLAN (UNAVAIL)" }
             } else {
                 "PLAN"
             };

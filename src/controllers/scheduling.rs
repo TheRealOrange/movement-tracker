@@ -686,3 +686,54 @@ pub(crate) async fn toggle_planned_status(
         }
     }
 }
+
+pub(crate) async fn get_planned_availability_details_by_tele_id(
+    conn: &PgPool,
+    tele_id: u64,
+) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
+    let result = sqlx::query_as!(
+        AvailabilityDetails,
+        r#"
+        SELECT
+            availability.id,
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            availability.avail,
+            availability.ict_type AS "ict_type: _",
+            availability.remarks,
+            availability.planned,
+            availability.saf100,
+            availability.attended,
+            availability.is_valid,
+            availability.created,
+            availability.updated
+        FROM availability
+        JOIN usrs ON usrs.id = availability.usr_id
+        WHERE usrs.tele_id = $1
+          AND availability.planned = TRUE
+        ORDER BY availability.avail ASC;
+        "#,
+        tele_id as i64
+    )
+        .fetch_all(conn)
+        .await;
+
+    match result {
+        Ok(availability_list) => {
+            log::info!(
+                "Found {} planned availability entries for tele_id: {}",
+                availability_list.len(),
+                tele_id
+            );
+            Ok(availability_list)
+        }
+        Err(e) => {
+            log::error!(
+                "Error fetching planned availability details for tele_id {}: {}",
+                tele_id,
+                e
+            );
+            Err(e)
+        }
+    }
+}
