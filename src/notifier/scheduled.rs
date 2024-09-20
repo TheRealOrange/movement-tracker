@@ -1,7 +1,8 @@
-use crate::types::{Availability, ScheduledNotifications, Usr};
+use crate::types::{Availability, ScheduledNotifications, Usr, UsrType};
 use sqlx::PgPool;
 use std::time::Duration;
 use teloxide::prelude::*;
+use crate::utils;
 
 pub(crate) async fn start_notifier(bot: Bot, conn: PgPool) {
     loop {
@@ -90,20 +91,23 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
             .fetch_one(&mut *tx)
             .await?;
 
-        // Send notification to the user
+        // Prepare detailed notification message
+        let message_text = format_detailed_notification(&availability, &user).unwrap_or_else(|text| text);
+
+        // Log the notification
         log::info!(
             "Sending notification to user {} for availability on {}",
-            user.ops_name, availability.avail
+            user.ops_name,
+            availability.avail
         );
 
         let chat_id = ChatId(user.tele_id);
 
-        let message_text = format!(
-            "Reminder: You have a planned availability on {}.",
-            availability.avail
-        );
-
-        if let Err(e) = bot.send_message(chat_id, message_text).await {
+        // Send the formatted message to the user with MarkdownV2 parsing
+        if let Err(e) = bot.send_message(chat_id, message_text)
+            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+            .await
+        {
             log::error!("Error sending message to user {}: {}", user.ops_name, e);
         }
 
@@ -124,4 +128,56 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
     tx.commit().await?;
 
     Ok(())
+}
+
+/// Formats a detailed notification message with proper MarkdownV2 escaping
+fn format_detailed_notification(availability: &Availability, user: &Usr) -> Result<String, String> {
+    // Escape special characters to prevent Markdown parsing issues
+    let date_str = availability.avail.format("%b %d, %Y").to_string();
+    let ict_type_str = &availability.ict_type.as_ref();
+
+    // Handle optional remarks with truncation and escaping
+    let remarks_str = match &availability.remarks {
+        Some(remarks) => {
+            let truncated = if remarks.len() > 50 {
+                format!("{}...", &remarks[..50])
+            } else {
+                remarks.clone()
+            };
+            utils::escape_special_characters(&truncated)
+        },
+        None => "None".to_string(),
+    };
+
+    // Determine SAF100 status based on user type and flags
+    let saf100_str = match user.usr_type {
+        UsrType::NS => {
+            if availability.saf100 {
+                "*SAF100 Issued*".to_string()
+            } else if availability.planned {
+                "*SAF100 Pending*".to_string()
+            } else {
+                "".to_string()
+            }
+        },
+        _ => "".to_string(),
+    };
+
+    // Compile the message with MarkdownV2 formatting
+    let mut message = format!(
+        "*Reminder: Upcoming Planned Event*\n\n\
+         *Date:* {}\n\
+         *Type:* {}\n\
+         *Remarks:* {}\n",
+        date_str, ict_type_str, remarks_str
+    );
+
+    if !saf100_str.is_empty() {
+        message.push_str(&format!("{}\n", saf100_str));
+    }
+
+    // Add any additional information if necessary
+    message.push_str("\nPlease ensure all preparations are complete.");
+
+    Ok(message)
 }

@@ -1,5 +1,5 @@
 use crate::bot::state::State;
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::types::{Apply, RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, utils};
 use rand::distributions::Alphanumeric;
@@ -11,6 +11,7 @@ use std::str::FromStr;
 use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
+use teloxide::RequestError;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
 
 // Generates the inline keyboard for applications with pagination
@@ -61,7 +62,7 @@ fn get_applications_text(
     slice_end: usize,
     total: usize
 ) -> String {
-    format!("Showing applications {} to {} of {}", start + 1, slice_end, total)
+    format!("Showing applications {} to {} of {}\nUpdated: {}", start + 1, slice_end, total, Local::now().format("%d %b %H:%M").to_string())
 }
 
 // Displays applications with pagination using message editing
@@ -74,7 +75,7 @@ async fn display_applications(
     start: usize,
     show: usize,
     msg_id: Option<MessageId>, // Optionally provide MessageId to edit
-) -> Result<MessageId, ()> {
+) -> Result<Option<MessageId>, ()> {
     let total = applications.len();
     let slice_end = min(start + show, total);
 
@@ -97,27 +98,27 @@ async fn display_applications(
     match msg_id {
         Some(id) => {
             // Edit the existing message
-            match bot.edit_message_text(chat_id, id, message_text)
-                .reply_markup(markup)
-                .await
-            {
-                Ok(_) => Ok(id),
+            match bot.edit_message_text(chat_id, id, message_text.clone())
+                .reply_markup(markup.clone())
+                .await {
+                Ok(edit_msg) => Ok(Some(edit_msg.id)),
                 Err(e) => {
                     log::error!("Failed to edit message: {}", e);
-                    Err(())
+                    Ok(send_msg(
+                        bot.send_message(chat_id, message_text)
+                            .reply_markup(markup),
+                        username
+                    ).await)
                 }
             }
         }
         None => {
             // Send a new message
-            match send_msg(
+            Ok(send_msg(
                 bot.send_message(chat_id, message_text)
                     .reply_markup(markup),
                 username
-            ).await {
-                Some(sent_msg) => Ok(sent_msg),
-                None => Err(())
-            }
+            ).await)
         }
     }
 }
@@ -144,8 +145,13 @@ async fn handle_re_show_options(
         Some(msg_id),
     ).await {
         Ok(msg_id) => {
-            log::debug!("Updated ApplyView with MsgId: {:?}, Start: {}", msg_id, start);
-            dialogue.update(State::ApplyView { msg_id, applications, prefix, start }).await?;
+            match msg_id {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(new_msg_id) => {
+                    log::debug!("Updated ApplyView with MsgId: {:?}, Start: {}", msg_id, start);
+                    dialogue.update(State::ApplyView { msg_id: new_msg_id, applications, prefix, start }).await?
+                }
+            }
         }
         Err(_) => dialogue.update(State::ErrorState).await?,
     };
@@ -158,7 +164,8 @@ async fn display_application_edit_prompt(
     username: &Option<String>,
     application: &Apply,
     admin: bool,
-) {
+    edit_id: Option<MessageId>
+) -> Option<MessageId> {
     let mut options: Vec<Vec<InlineKeyboardButton>> = ["NAME", "OPS NAME", "ROLE", "TYPE", "ADMIN"]
         .into_iter()
         .map(|option| vec![InlineKeyboardButton::callback(option, option)])
@@ -169,25 +176,53 @@ async fn display_application_edit_prompt(
         .collect();
     options.push(confirm);
 
-    send_msg(
-        bot.send_message(
-            chat_id,
-            format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nDo you wish to edit any entries?",
-                &application.name,
-                &application.ops_name,
-                application.role_type.as_ref(),
-                application.usr_type.as_ref(),
-                &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-                &application.chat_username,
-                if admin == true { "YES" } else { "NO" }
-            )
-        )
-            .reply_markup(InlineKeyboardMarkup::new(options)),
-        username
-    ).await;
+    let cloned_keyboard = options.clone();
+
+    let send_new_msg = || async {
+        send_msg(
+            bot.send_message(
+                chat_id,
+                format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
+                        &application.name,
+                        &application.ops_name,
+                        application.role_type.as_ref(),
+                        application.usr_type.as_ref(),
+                        &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
+                        &application.chat_username,
+                        if admin == true { "YES" } else { "NO" },
+                        Local::now().format("%d %b %H:%M").to_string()
+                )
+            ).reply_markup(InlineKeyboardMarkup::new(cloned_keyboard)),
+            username
+        ).await
+    };
+
+    match edit_id {
+        None => {
+            send_new_msg().await
+        }
+        Some(msg_id) => {
+            match bot.edit_message_text(
+                chat_id, msg_id,
+                format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
+                        &application.name,
+                        &application.ops_name,
+                        application.role_type.as_ref(),
+                        application.usr_type.as_ref(),
+                        &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
+                        &application.chat_username,
+                        if admin == true { "YES" } else { "NO" },
+                        Local::now().format("%d %b %H:%M").to_string()
+                )
+            ).reply_markup(InlineKeyboardMarkup::new(options)).await {
+                Ok(edited_msg) => Some(edited_msg.id),
+                Err(_) => send_new_msg().await
+            }
+        }
+    }
 }
 
-async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let roles = RoleType::iter()
         .map(|role| InlineKeyboardButton::callback(role.as_ref(), role.as_ref()));
 
@@ -195,10 +230,10 @@ async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<S
         bot.send_message(chat_id, "Select role:")
             .reply_markup(InlineKeyboardMarkup::new([roles])),
         username
-    ).await;
+    ).await
 }
 
-async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let usrtypes = UsrType::iter()
         .map(|usrtype| InlineKeyboardButton::callback(usrtype.as_ref(), usrtype.as_ref()));
 
@@ -206,24 +241,24 @@ async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<S
         bot.send_message(chat_id, "Select user type:")
             .reply_markup(InlineKeyboardMarkup::new([usrtypes])),
         username
-    ).await;
+    ).await
 }
 
-async fn display_edit_name(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_name(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     send_msg(
         bot.send_message(chat_id, "Enter full name:"),
         username,
-    ).await;
+    ).await
 }
 
-async fn display_edit_ops_name(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_ops_name(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     send_msg(
         bot.send_message(chat_id, "Enter OPS NAME:"),
         username,
-    ).await;
+    ).await
 }
 
-async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let confirm = ["YES", "NO"]
         .map(|product| InlineKeyboardButton::callback(product, product));
 
@@ -231,7 +266,7 @@ async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String
         bot.send_message(chat_id, "Make user admin?")
             .reply_markup(InlineKeyboardMarkup::new([confirm])),
         username
-    ).await;
+    ).await
 }
 
 pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> HandlerResult {
@@ -278,8 +313,13 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
             match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, 8, None)
                 .await {
                 Ok(msg_id) => {
-                    log::debug!("Transitioning to ApplyView with MsgId: {:?}, Applications: {:?}, Prefix: {:?}, Start: {:?}", msg_id, applications, prefix, 0);
-                    dialogue.update(State::ApplyView { msg_id, applications, prefix, start: 0 }).await?
+                    match msg_id {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => {
+                            log::debug!("Transitioning to ApplyView with MsgId: {:?}, Applications: {:?}, Prefix: {:?}, Start: {:?}", msg_id, applications, prefix, 0);
+                            dialogue.update(State::ApplyView { msg_id: new_msg_id, applications, prefix, start: 0 }).await?
+                        }
+                    }
                 },
                 Err(_) => dialogue.update(State::ErrorState).await?
             };
@@ -303,6 +343,11 @@ pub(super) async fn apply_view(
         "Prefix" => prefix,
         "Start" => start
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -332,9 +377,13 @@ pub(super) async fn apply_view(
                             Ok(parsed_id) => {
                                 match controllers::apply::get_apply_by_uuid(&pool, parsed_id).await {
                                     Ok(application) => {
-                                        display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, false).await;
-                                        log::debug!("Transitioning to ApplyEditPrompt with Application: {:?}, Admin: {:?}", application, false );
-                                        dialogue.update(State::ApplyEditPrompt { application, admin: false }).await?;
+                                        match display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, false, Some(msg_id)).await {
+                                            None => {}
+                                            Some(msg_id) => {
+                                                log::debug!("Transitioning to ApplyEditPrompt with Application: {:?}, Admin: {:?}", application, false );
+                                                dialogue.update(State::ApplyEditPrompt { msg_id, application, admin: false }).await?;
+                                            }
+                                        };
                                     }
                                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }
@@ -353,15 +402,21 @@ pub(super) async fn apply_view(
 pub(super) async fn apply_edit_prompt(
     bot: Bot,
     dialogue: MyDialogue,
-    (application, admin): (Apply, bool),
+    (msg_id, application, admin): (MessageId, Apply, bool),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_prompt", "Callback", q,
+        "MessageId" => msg_id,
         "Application" => application,
         "Admin" => admin
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -369,9 +424,7 @@ pub(super) async fn apply_edit_prompt(
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
-            )
-                .await;
-            display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
+            ).await;
         }
         Some(option) => match option.as_str() {
             "DONE" => {
@@ -402,8 +455,7 @@ pub(super) async fn apply_edit_prompt(
                                         None,        // notif_availability
                                         Some(true),  // notif_plan
                                         Some(true),  // notif_conflict
-                                    ).await
-                                    {
+                                    ).await {
                                         Ok(_) => {
                                             log::info!("Default notification settings configured for admin user {}", &user.name);
                                         }
@@ -424,11 +476,30 @@ pub(super) async fn apply_edit_prompt(
                                         &q.from.username,
                                     ).await;
                                 }
+                                
+                                match bot.edit_message_text(
+                                    dialogue.chat_id(), msg_id,
+                                    format!("Approved application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nADDED: {}\nUSERNAME: {}\nIS ADMIN: {}",
+                                            &user.name,
+                                            &user.ops_name,
+                                            user.role_type.as_ref(),
+                                            user.usr_type.as_ref(),
+                                            &user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
+                                            &application.chat_username,
+                                            if admin == true { "YES" } else { "NO" },
+                                    )
+                                ).await {
+                                    Ok(_) => {}
+                                    Err(e) => { 
+                                        log::error!("Error editing message ({}): {}", msg_id, e);
+                                        send_msg(
+                                            bot.send_message(dialogue.chat_id(), "Approved."),
+                                            &q.from.username,
+                                        ).await;
+                                    }
+                                };
 
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), "Done."),
-                                    &q.from.username,
-                                ).await;
+                                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                                 dialogue.update(State::Start).await?;
                             }
                             Err(e) => {
@@ -445,6 +516,7 @@ pub(super) async fn apply_edit_prompt(
             }
             "CANCEL" => {
                 // Operation cancelled
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                     &q.from.username,
@@ -454,37 +526,45 @@ pub(super) async fn apply_edit_prompt(
             }
             "NAME" => {
                 // Edit name
-                display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await;
-                dialogue.update(State::ApplyEditName { application, admin }).await?;
+                match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => dialogue.update(State::ApplyEditName { msg_id, change_msg_id, application, admin }).await?
+                }
             }
             "OPS NAME" => {
                 // Edit OPS name
-                display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await;
-                dialogue.update(State::ApplyEditOpsName { application, admin }).await?;
+                match display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => dialogue.update(State::ApplyEditOpsName { msg_id, change_msg_id, application, admin }).await?
+                }
             }
             "ROLE" => {
                 // Edit role
-                display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
-                dialogue.update(State::ApplyEditRole { application, admin }).await?;
+                match display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => dialogue.update(State::ApplyEditRole { msg_id, change_msg_id, application, admin }).await?
+                }
             }
             "TYPE" => {
                 // Edit user type
-                display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
-                dialogue.update(State::ApplyEditType { application, admin }).await?;
+                match display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => dialogue.update(State::ApplyEditType { msg_id, change_msg_id, application, admin }).await?
+                }
             }
             "ADMIN" => {
                 // Edit admin status
-                display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;
-                dialogue.update(State::ApplyEditAdmin { application, admin }).await?;
+                match display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => dialogue.update(State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }).await?
+                }
             }
             _ => {
                 // Handle any other invalid options
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Invalid option."),
                     &q.from.username,
-                )
-                    .await;
-                display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
+                ).await;
             }
         },
     }
@@ -496,10 +576,12 @@ pub(super) async fn apply_edit_name(
     bot: Bot,
     dialogue: MyDialogue,
     msg: Message,
-    (mut application, admin): (Apply, bool)
+    (msg_id, change_msg_id, mut application, admin): (MessageId, MessageId, Apply, bool)
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_name", "Message", msg,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Application" => application,
         "Admin" => admin
     );
@@ -564,8 +646,11 @@ pub(super) async fn apply_edit_name(
             }
 
             application.name = cleaned_name.to_string();
-            display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin).await;
-            dialogue.update(State::ApplyEditPrompt { application, admin }).await?;
+            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+            match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, Some(msg_id)).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+            }
         }
         None => {
             // If no text is found in the message, prompt the user to send their full name
@@ -584,11 +669,13 @@ pub(super) async fn apply_edit_ops_name(
     bot: Bot,
     dialogue: MyDialogue,
     msg: Message,
-    (mut application, admin): (Apply, bool),
+    (msg_id, change_msg_id, mut application, admin): (MessageId, MessageId, Apply, bool),
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_ops_name", "Message", msg,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Application" => application,
         "Admin" => admin
     );
@@ -604,7 +691,7 @@ pub(super) async fn apply_edit_ops_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_ops_name_raw) => {
-            let cleaned_ops_name = utils::cleanup_name(&input_ops_name_raw);
+            let cleaned_ops_name = utils::cleanup_name(&input_ops_name_raw).to_uppercase();
 
             // Validate that the OPS name contains only allowed characters and is not empty
             if !utils::is_valid_ops_name(&cleaned_ops_name) {
@@ -676,8 +763,11 @@ pub(super) async fn apply_edit_ops_name(
                 },
                 Ok(false) => {
                     application.ops_name = cleaned_ops_name.clone();
-                    display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin).await;
-                    dialogue.update(State::ApplyEditPrompt { application, admin }).await?;
+                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                    match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, Some(msg_id)).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+                    }
                 },
                 Err(e) => {
                     // Handle unexpected database errors
@@ -705,14 +795,21 @@ pub(super) async fn apply_edit_ops_name(
 pub(super) async fn apply_edit_role(
     bot: Bot,
     dialogue: MyDialogue,
-    (mut application, admin): (Apply, bool),
+    (msg_id, change_msg_id, mut application, admin): (MessageId, MessageId, Apply, bool),
     q: CallbackQuery
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_role", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Application" => application,
         "Admin" => admin
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -720,8 +817,6 @@ pub(super) async fn apply_edit_role(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-
-            display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(roletype) => {
             log::debug!("Received input: {:?}", &roletype);
@@ -734,8 +829,11 @@ pub(super) async fn apply_edit_role(
                     ).await;
 
                     application.role_type = role_type_enum;
-                    display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
-                    dialogue.update(State::ApplyEditPrompt { application, admin }).await?;
+                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                    match display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin, Some(msg_id)).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+                    }
                 }
                 Err(e) => {
                     log::error!("Invalid role type received: {}", e);
@@ -743,7 +841,6 @@ pub(super) async fn apply_edit_role(
                         bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                         &q.from.username,
                     ).await;
-                    display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }
@@ -755,14 +852,21 @@ pub(super) async fn apply_edit_role(
 pub(super) async fn apply_edit_type(
     bot: Bot,
     dialogue: MyDialogue,
-    (mut application, admin): (Apply, bool),
+    (msg_id, change_msg_id, mut application, admin): (MessageId, MessageId, Apply, bool),
     q: CallbackQuery
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_type", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Application" => application,
         "Admin" => admin
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -770,8 +874,6 @@ pub(super) async fn apply_edit_type(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-
-            display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(usrtype) => {
             log::debug!("Received input: {:?}", &usrtype);
@@ -784,8 +886,11 @@ pub(super) async fn apply_edit_type(
                     ).await;
 
                     application.usr_type = user_type_enum;
-                    display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin).await;
-                    dialogue.update(State::ApplyEditPrompt { application, admin }).await?;
+                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                    match display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, admin, Some(msg_id)).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+                    };
                 }
                 Err(e) => {
                     log::error!("Invalid role type received: {}", e);
@@ -793,7 +898,6 @@ pub(super) async fn apply_edit_type(
                         bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                         &q.from.username,
                     ).await;
-                    display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }
@@ -805,14 +909,21 @@ pub(super) async fn apply_edit_type(
 pub(super) async fn apply_edit_admin(
     bot: Bot,
     dialogue: MyDialogue,
-    (application, admin): (Apply, bool),
+    (msg_id, change_msg_id, application, admin): (MessageId, MessageId, Apply, bool),
     q: CallbackQuery
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "apply_edit_admin", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Application" => application,
         "Admin" => admin
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -820,24 +931,27 @@ pub(super) async fn apply_edit_admin(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-
-            display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(make_admin_input) => {
             log::debug!("Received input: {:?}", &make_admin_input);
             if make_admin_input == "YES" {
-                display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, true).await;
-                dialogue.update(State::ApplyEditPrompt { application, admin: true }).await?;
+                log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                match display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, true, Some(msg_id)).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin: true }).await?
+                };
             } else if make_admin_input == "NO" {
-                display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, false).await;
-                dialogue.update(State::ApplyEditPrompt { application, admin: false }).await?;
+                log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                match display_application_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &application, false, Some(msg_id)).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin: false }).await?
+                };
             } else {
                 log::error!("Invalid set admin input received: {}", make_admin_input);
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
                     &q.from.username,
                 ).await;
-                display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await;
             }
         }
     }

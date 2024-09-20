@@ -146,6 +146,11 @@ pub(super) async fn user_edit_prompt(
         "User Details" => user_details
     );
 
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
     match q.data {
         None => {
             send_msg(
@@ -309,6 +314,11 @@ pub(super) async fn user_edit_type(
         "User Details" => user_details
     );
 
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
     match q.data {
         None => {
             send_msg(
@@ -358,6 +368,11 @@ pub(super) async fn user_edit_admin(
         "User Details" => user_details
     );
 
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
     match q.data {
         None => {
             send_msg(
@@ -402,6 +417,11 @@ pub(super) async fn user_edit_delete(
         dialogue.chat_id(), "user_edit_delete", "Callback", q,
         "User Details" => user_details
     );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {

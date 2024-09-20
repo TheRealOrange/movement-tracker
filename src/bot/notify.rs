@@ -1,11 +1,12 @@
 use std::sync::Arc;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
-use sqlx::{Error, PgPool};
+use sqlx::PgPool;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
+use teloxide::RequestError;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::state::State;
 use crate::types::NotificationSettings;
@@ -181,6 +182,11 @@ pub(super) async fn notify_settings(
         "Prefix" => prefix
     );
 
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
     match q.data {
         None => {
             send_msg(
@@ -208,13 +214,22 @@ pub(super) async fn notify_settings(
                             Some(notification_settings.notif_conflict)
                         ).await {
                             Ok(settings) => {
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), format!(
-                                        "Updated notification settings for chat:\n{}",
-                                        format_notification_settings(&settings)
-                                    )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
-                                    &q.from.username,
-                                ).await;
+                                match bot.edit_message_text(dialogue.chat_id(), msg_id, format!(
+                                    "Updated notification settings for chat:\n{}",
+                                    format_notification_settings(&settings)
+                                )).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
+                                    Ok(_) => {}
+                                    Err(_) => {
+                                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                                        send_msg(
+                                            bot.send_message(dialogue.chat_id(), format!(
+                                                "Updated notification settings for chat:\n{}",
+                                                format_notification_settings(&settings)
+                                            )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                                            &q.from.username,
+                                        ).await;
+                                    }
+                                };
                                 
                                 if dialogue.chat_id() != chat_id {
                                     send_msg(
@@ -232,6 +247,7 @@ pub(super) async fn notify_settings(
                             Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await,
                         }
                     } else if option == "CANCEL" {
+                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                         send_msg(
                             bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                             &q.from.username,

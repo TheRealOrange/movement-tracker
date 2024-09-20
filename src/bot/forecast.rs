@@ -1,7 +1,7 @@
 // implement functions used to provide a week forecast, a month forecast
 
 use crate::bot::state::State;
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::types::{AvailabilityDetails, RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, utils};
 use chrono::{Duration, Local, NaiveDate};
@@ -9,9 +9,9 @@ use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 
-async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate) {
+async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate, edit_msg: Option<MessageId>) -> Option<MessageId> {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
         .filter_map(|role| if *role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
         .collect();
@@ -37,7 +37,8 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
 
     // Header for role type and period with formatted dates
     let mut output_text = format!(
-        "*Availability forecast for role:* __{}__ *from* __{}__ *to* __{}__\n\n",
+        "*{} for role:* __{}__ *from* __{}__ *to* __{}__\n\n",
+        if availability_list.is_empty() { "No availability entries" } else { "Availability forecast" },
         role_type.as_ref(),
         start.format("%b\\-%d\\-%Y"),
         end.format("%b\\-%d\\-%Y")
@@ -85,13 +86,38 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
         }
         output_text.push('\n'); // Add space between dates
     }
+    
+    output_text.push_str(format!("\nUpdated: {}", Local::now().format("%d %b %H:%M").to_string()).as_ref());
 
-    send_msg(
-        bot.send_message(chat_id, output_text)
-            .parse_mode(ParseMode::MarkdownV2)
-            .reply_markup(InlineKeyboardMarkup::new(options)),
-        username
-    ).await;
+    // Send or edit the message
+    match edit_msg {
+        Some(id) => {
+            // Edit the existing message
+            match bot.edit_message_text(chat_id, id, output_text.clone())
+                .parse_mode(ParseMode::MarkdownV2)
+                .reply_markup(InlineKeyboardMarkup::new(options.clone()))
+                .await {
+                Ok(edit_msg) => Some(edit_msg.id),
+                Err(e) => {
+                    log::error!("Failed to update existing message ({}): {}", id.0, e);
+                    send_msg(
+                        bot.send_message(chat_id, output_text)
+                            .parse_mode(ParseMode::MarkdownV2)
+                            .reply_markup(InlineKeyboardMarkup::new(options)),
+                        username
+                    ).await
+                }
+            }
+        }
+        None => {
+            send_msg(
+                bot.send_message(chat_id, output_text)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .reply_markup(InlineKeyboardMarkup::new(options)),
+                username
+            ).await
+        }
+    }
 }
 
 
@@ -115,8 +141,10 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
             let end = start.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, role_type.clone(), start, end).await {
                 Ok(availability_list) => {
-                    display_availability_forecast(&bot, dialogue.chat_id(), &user.username, &role_type, &availability_list, start, end).await;
-                    dialogue.update(State::ForecastView { availability_list, role_type, start, end }).await?;
+                    match display_availability_forecast(&bot, dialogue.chat_id(), &user.username, &role_type, &availability_list, start, end, None).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(msg_id) => dialogue.update(State::ForecastView { msg_id, availability_list, role_type, start, end }).await?
+                    };
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
             }
@@ -130,11 +158,22 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
 pub(super) async fn forecast_view(
     bot: Bot,
     dialogue: MyDialogue,
-    (availability_list, role_type, start, end): (Vec<AvailabilityDetails>, RoleType, NaiveDate, NaiveDate),
+    (msg_id, availability_list, role_type, start, end): (MessageId, Vec<AvailabilityDetails>, RoleType, NaiveDate, NaiveDate),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
-    log_endpoint_hit!(dialogue.chat_id(), "forecast_view", "Callback", q);
+    log_endpoint_hit!(dialogue.chat_id(), "forecast_view", "Callback", q,
+        "MessageId" => msg_id,
+        "AvailabilityList" => availability_list,
+        "RoleType" => role_type,
+        "Start" => start,
+        "End" => end
+    );
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
 
     match q.data {
         None => {
@@ -142,7 +181,6 @@ pub(super) async fn forecast_view(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &role_type, &availability_list, start, end).await;
         }
         Some(option) => {
             let mut new_role = role_type.clone();
@@ -168,15 +206,12 @@ pub(super) async fn forecast_view(
                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                 }
             } else if option == "DONE" {
-                // Edit the existing message to remove the inline keyboard
-                if let Some(message) = q.message {
-                    if let Err(e) = bot.edit_message_reply_markup(dialogue.chat_id(), message.id()).await {
-                        log::error!("Failed to edit message reply markup: {}", e);
-                        handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
-                        return Ok(());
-                    }
+                if availability_list.is_empty() {
+                    // Delete the existing message if no availability is shown
+                    log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                 } else {
-                    log::warn!("No message found in CallbackQuery for 'DONE' option.");
+                    // Edit the existing message to remove the inline keyboard
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 }
                 dialogue.update(State::Start).await?;
                 return Ok(());
@@ -186,7 +221,10 @@ pub(super) async fn forecast_view(
                         new_role = input_role_enum;
                     }
                     Err(_) => {
-                        display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &role_type, &availability_list, start, end).await;
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), "Invalid option."),
+                            &q.from.username,
+                        ).await;
                         return Ok(());
                     }
                 }
@@ -194,8 +232,10 @@ pub(super) async fn forecast_view(
 
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, new_role.clone(), new_start, new_end).await {
                 Ok(availability_list_new) => {
-                    display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &new_role, &availability_list_new, new_start, new_end).await;
-                    dialogue.update(State::ForecastView { availability_list: availability_list_new, role_type: new_role, start: new_start, end: new_end }).await?;
+                    match display_availability_forecast(&bot, dialogue.chat_id(), &q.from.username, &new_role, &availability_list_new, new_start, new_end, Some(msg_id)).await {
+                        None => {}
+                        Some(new_msg_id) => dialogue.update(State::ForecastView { msg_id: new_msg_id, availability_list: availability_list_new, role_type: new_role, start: new_start, end: new_end }).await?
+                    };
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }

@@ -681,6 +681,11 @@ pub(super) async fn plan_view(
         "Start" => start
     );
 
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
     match q.data {
         None => {
             send_msg(

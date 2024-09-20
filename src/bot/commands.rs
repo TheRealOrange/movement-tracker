@@ -44,6 +44,8 @@ pub(super) enum PrivilegedCommands {
     Plan {
         ops_name_or_date: String
     },
+    #[command(description = "Track SAF100")]
+    SAF100,
     #[command(description = "Edit notification settings for current chat")]
     Notify
 }

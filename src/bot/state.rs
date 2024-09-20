@@ -16,6 +16,7 @@ use crate::bot::plan::{plan, plan_view};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::notify::{notify, notify_settings};
+use crate::bot::saf100::{saf100, saf100_confirm, saf100_select, saf100_view};
 use crate::bot::upcoming::upcoming;
 
 #[derive(Clone, Default)]
@@ -23,20 +24,26 @@ pub(super) enum State {
     #[default]
     Start,
     // States used for registering for an account
-    RegisterRole,
+    RegisterRole {
+        msg_id: MessageId,
+    },
     RegisterType {
+        msg_id: MessageId,
         role_type: RoleType,
     },
     RegisterName {
+        msg_id: MessageId,
         role_type: RoleType,
         user_type: UsrType,
     },
     RegisterOpsName {
+        msg_id: MessageId,
         role_type: RoleType,
         user_type: UsrType,
         name: String,
     },
     RegisterComplete {
+        msg_id: MessageId,
         role_type: RoleType,
         user_type: UsrType,
         name: String,
@@ -50,26 +57,37 @@ pub(super) enum State {
         start: usize
     },
     ApplyEditPrompt {
+        msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditName {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditOpsName {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditRole {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditType {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditAdmin {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
@@ -82,6 +100,7 @@ pub(super) enum State {
     // },
     // States used for adding and modifying availability for SANS
     AvailabilityView {
+        msg_id: MessageId,
         availability_list: Vec<Availability>
     },
     AvailabilitySelect {
@@ -109,9 +128,12 @@ pub(super) enum State {
         start: usize
     },
     AvailabilityAdd {
+        msg_id: MessageId,
         avail_type: Ict
     },
     AvailabilityAddChangeType {
+        msg_id: MessageId,
+        change_type_msg_id: MessageId,
         avail_type: Ict
     },
     AvailabilityAddRemarks {
@@ -120,6 +142,7 @@ pub(super) enum State {
     },
     // States meant for viewing the forecast
     ForecastView {
+        msg_id: MessageId,
         availability_list: Vec<AvailabilityDetails>,
         role_type: RoleType, 
         start: NaiveDate, 
@@ -155,7 +178,26 @@ pub(super) enum State {
     UserEditDeleteConfirm {
         user_details: Usr
     },
-    // States meant for editing the notification settings
+    // States meant for tracking saf100 issued
+    Saf100Select {
+        msg_id: MessageId
+    },
+    Saf100View {
+        msg_id: MessageId,
+        availability_list: Vec<AvailabilityDetails>,
+        prefix: String,
+        start: usize,
+        action: String
+    },
+    Saf100Confirm {
+        msg_id: MessageId,
+        availability: Availability,
+        availability_list: Vec<AvailabilityDetails>,
+        prefix: String,
+        start: usize,
+        action: String
+    },
+// States meant for editing the notification settings
     NotifySettings {
         notification_settings: NotificationSettings,
         chat_id: ChatId,
@@ -180,53 +222,57 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![PrivilegedCommands::User { ops_name }].branch(dptree::filter_async(check_private).endpoint(user)))
         .branch(case![PrivilegedCommands::Approve].branch(dptree::filter_async(check_private).endpoint(approve)))
         .branch(case![PrivilegedCommands::Plan { ops_name_or_date }].branch(dptree::filter_async(check_private).endpoint(plan)))
+        .branch(case![PrivilegedCommands::SAF100].branch(dptree::filter_async(check_private).endpoint(saf100)))
         .branch(case![PrivilegedCommands::Notify].endpoint(notify));
 
     let message_handler = Update::filter_message()
         .branch(case![State::ErrorState].endpoint(error_state))
         .branch(command_handler)
-        .branch(case![State::RegisterName { role_type, user_type }].endpoint(register_name))
-        .branch(case![State::RegisterOpsName { role_type, user_type, name }].endpoint(register_ops_name))
+        .branch(case![State::RegisterName { msg_id, role_type, user_type }].endpoint(register_name))
+        .branch(case![State::RegisterOpsName { msg_id, role_type, user_type, name }].endpoint(register_ops_name))
         .branch(dptree::filter_async(check_registered)
             .branch(dptree::filter_async(check_admin)
                 .branch(admin_command_handler)
-                .branch(case![State::ApplyEditName { application, admin }].endpoint(apply_edit_name))
-                .branch(case![State::ApplyEditOpsName { application, admin }].endpoint(apply_edit_ops_name))
+                .branch(case![State::ApplyEditName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_name))
+                .branch(case![State::ApplyEditOpsName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_ops_name))
                 .branch(case![State::UserEditName { user_details }].endpoint(user_edit_name))
                 .branch(case![State::UserEditOpsName { user_details }].endpoint(user_edit_ops_name))
             )
-            .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
+            .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
             .branch(case![State::AvailabilityModifyRemarks { availability_entry, action, start }].endpoint(availability_modify_remarks))
-            .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_message))
+            .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))
             .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_remarks))
         );
     
 
     let callback_query_handler = Update::filter_callback_query()
-        .branch(case![State::RegisterRole].endpoint(register_role))
-        .branch(case![State::RegisterType { role_type }].endpoint(register_type))
-        .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete))
+        .branch(case![State::RegisterRole { msg_id }].endpoint(register_role))
+        .branch(case![State::RegisterType { msg_id, role_type }].endpoint(register_type))
+        .branch(case![State::RegisterComplete { msg_id, role_type, user_type, name, ops_name }].endpoint(register_complete))
         .branch(dptree::filter_async(check_admin_callback)
             .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
             .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(apply_view))
-            .branch(case![State::ApplyEditPrompt { application, admin }].endpoint(apply_edit_prompt))
-            .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
-            .branch(case![State::ApplyEditType { application, admin }].endpoint(apply_edit_type))
-            .branch(case![State::ApplyEditAdmin { application, admin }].endpoint(apply_edit_admin))
+            .branch(case![State::ApplyEditPrompt { msg_id, application, admin }].endpoint(apply_edit_prompt))
+            .branch(case![State::ApplyEditRole { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_role))
+            .branch(case![State::ApplyEditType { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_type))
+            .branch(case![State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_admin))
             .branch(case![State::UserEdit { user_details }].endpoint(user_edit_prompt))
             .branch(case![State::UserEditType { user_details }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
+            .branch(case![State::Saf100Select { msg_id }].endpoint(saf100_select))
+            .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
+            .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(saf100_confirm))
         )
-        .branch(case![State::AvailabilityView { availability_list }].endpoint(availability_view))
+        .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
         .branch(case![State::AvailabilityModify { availability_entry, availability_list, action, prefix, start }].endpoint(availability_modify))
         .branch(case![State::AvailabilityModifyType { availability_entry, action, start }].endpoint(availability_modify_type))
-        .branch(case![State::AvailabilityAdd { avail_type }].endpoint(availability_add_callback))
-        .branch(case![State::AvailabilityAddChangeType { avail_type }].endpoint(availability_add_change_type))
+        .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_callback))
+        .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
         .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_complete))
-        .branch(case![State::ForecastView { availability_list, role_type, start, end }].endpoint(forecast_view));
+        .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)

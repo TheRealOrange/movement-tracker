@@ -19,6 +19,7 @@ pub(self) mod forecast;
 pub(self) mod notify;
 pub(self) mod plan;
 pub(self) mod upcoming;
+mod saf100;
 
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -62,6 +63,20 @@ pub(self) async fn handle_error(
     )
         .await;
     dialogue.update(State::ErrorState).await.unwrap_or(());
+}
+
+pub(self) async fn log_try_delete_msg(bot: &Bot, chat_id: ChatId, msg_id: MessageId) {
+    match bot.delete_message(chat_id, msg_id).await {
+        Ok(_) => {}
+        Err(_) => { log::error!("Failed to delete message ({})", msg_id.0); }
+    };
+}
+
+pub(self) async fn log_try_remove_markup(bot: &Bot, chat_id: ChatId, msg_id: MessageId) {
+    match bot.edit_message_reply_markup(chat_id, msg_id).await {
+        Ok(_) => {}
+        Err(_) => { log::error!("Failed to remove message markup ({})", msg_id.0); }
+    };
 }
 
 #[macro_export]
