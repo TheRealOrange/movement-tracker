@@ -88,23 +88,25 @@ pub(crate) async fn edit_avail_by_uuid(
                 (SELECT availability_id FROM notification_handling),
                 times.scheduled_time
             FROM (
-                SELECT
-                    (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '9 hours'
-                    - INTERVAL '5 days' AS scheduled_time
+                -- Immediate Notification
+                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
                 UNION ALL
+                -- 5 Days Prior Notification (only if at least 5 days remain)
                 SELECT
                     (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '9 hours'
+                    + INTERVAL '09 hours'
+                    - INTERVAL '5 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5
+                UNION ALL
+                -- 2 Days Prior Notification (only if at least 2 days remain)
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '09 hours'
                     - INTERVAL '2 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2
             ) AS times
             WHERE (SELECT new_planned FROM notification_handling) = TRUE
             RETURNING id
-        ),
-        usr AS (
-            SELECT id, ops_name, usr_type
-            FROM usrs
-            WHERE id = (SELECT usr_id FROM update_availability)
         )
         SELECT
             update_availability.id,
@@ -120,7 +122,7 @@ pub(crate) async fn edit_avail_by_uuid(
             update_availability.created,
             update_availability.updated
         FROM update_availability
-        JOIN usr ON update_availability.usr_id = usr.id;
+        JOIN usrs AS usr ON update_availability.usr_id = usr.id;
         "#,
         availability_id,
         planned,
@@ -154,20 +156,6 @@ pub(crate) async fn set_user_unavail(
             SET is_valid = FALSE
             WHERE id = $1
             RETURNING *
-        ),
-        notification_handling AS (
-            SELECT
-                update_availability.planned AS new_planned,
-                update_availability.id AS availability_id
-            FROM update_availability
-        ),
-        invalidate_notifications AS (
-            UPDATE scheduled_notifications
-            SET is_valid = FALSE
-            WHERE avail_id = (SELECT availability_id FROM notification_handling)
-              AND sent = FALSE
-              AND (SELECT new_planned FROM notification_handling) = FALSE
-            RETURNING id
         ),
         usr AS (
             SELECT id, ops_name, usr_type
@@ -409,15 +397,22 @@ pub(crate) async fn add_user_avail(
                 (SELECT availability_id FROM notification_handling),
                 times.scheduled_time
             FROM (
-                SELECT
-                    (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '9 hours'  -- Set time to 09:00
-                    - INTERVAL '5 days' AS scheduled_time
+                -- Immediate Notification
+                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
                 UNION ALL
+                -- 5 Days Prior Notification (only if at least 5 days remain)
                 SELECT
                     (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '9 hours'
+                    + INTERVAL '09 hours'
+                    - INTERVAL '5 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5
+                UNION ALL
+                -- 2 Days Prior Notification (only if at least 2 days remain)
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '09 hours'
                     - INTERVAL '2 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2
             ) AS times
             WHERE (SELECT new_planned FROM notification_handling) = TRUE
             RETURNING id
@@ -633,34 +628,64 @@ pub(crate) async fn toggle_planned_status(
             UPDATE availability
             SET planned = NOT planned
             WHERE id = $1
-            RETURNING
-                id,
-                usr_id,
-                avail,
-                ict_type,
-                remarks,
-                planned,
-                saf100,
-                attended,
-                is_valid,
-                created,
-                updated
+            RETURNING *
+        ),
+        notification_handling AS (
+            SELECT
+                update_statement.planned AS new_planned,
+                update_statement.id AS availability_id,
+                update_statement.avail AS avail_date
+            FROM update_statement
+        ),
+        invalidate_notifications AS (
+            UPDATE scheduled_notifications
+            SET is_valid = FALSE
+            WHERE avail_id = (SELECT availability_id FROM notification_handling)
+              AND sent = FALSE
+              AND (SELECT new_planned FROM notification_handling) = FALSE
+            RETURNING id
+        ),
+        schedule_notifications AS (
+            INSERT INTO scheduled_notifications (avail_id, scheduled_time)
+            SELECT
+                (SELECT availability_id FROM notification_handling),
+                times.scheduled_time
+            FROM (
+                -- Immediate Notification
+                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
+                UNION ALL
+                -- 5 Days Prior Notification (only if at least 5 days remain)
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '09 hours'
+                    - INTERVAL '5 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5
+                UNION ALL
+                -- 2 Days Prior Notification (only if at least 2 days remain)
+                SELECT
+                    (SELECT avail_date FROM notification_handling)::timestamp
+                    + INTERVAL '09 hours'
+                    - INTERVAL '2 days' AS scheduled_time
+                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2
+            ) AS times
+            WHERE (SELECT new_planned FROM notification_handling) = TRUE
+            RETURNING id
         )
         SELECT
             update_statement.id,
             usrs.ops_name,
             usrs.usr_type AS "usr_type: _",
             update_statement.avail,
-            update_statement.planned,
             update_statement.ict_type AS "ict_type: _",
             update_statement.remarks,
+            update_statement.planned,
             update_statement.saf100,
             update_statement.attended,
             update_statement.is_valid,
             update_statement.created,
             update_statement.updated
-        FROM usrs
-        JOIN update_statement ON usrs.id = update_statement.usr_id;
+        FROM update_statement
+        JOIN usrs ON update_statement.usr_id = usrs.id;
         "#,
         availability_id
     )
