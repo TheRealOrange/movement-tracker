@@ -153,7 +153,7 @@ pub(super) async fn saf100(
     log_endpoint_hit!(dialogue.chat_id(), "saf100", "Command", msg);
 
     // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from() {
+    let user = if let Some(ref user) = msg.from {
         user
     } else {
         log::error!("Cannot get user from message");

@@ -87,7 +87,7 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
         output_text.push('\n'); // Add space between dates
     }
     
-    output_text.push_str(format!("\nUpdated: {}", Local::now().format("%d %b %H:%M").to_string()).as_ref());
+    output_text.push_str(format!("\nUpdated: {}", Local::now().format("%d%m %H%M\\.%S").to_string()).as_ref());
 
     // Send or edit the message
     match edit_msg {

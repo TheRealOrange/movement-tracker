@@ -62,7 +62,7 @@ fn get_applications_text(
     slice_end: usize,
     total: usize
 ) -> String {
-    format!("Showing applications {} to {} of {}\nUpdated: {}", start + 1, slice_end, total, Local::now().format("%d %b %H:%M").to_string())
+    format!("Showing applications {} to {} of {}\nUpdated: {}", start + 1, slice_end, total, Local::now().format("%d%m %H%M.%S").to_string())
 }
 
 // Displays applications with pagination using message editing
@@ -190,7 +190,7 @@ async fn display_application_edit_prompt(
                         &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
                         &application.chat_username,
                         if admin == true { "YES" } else { "NO" },
-                        Local::now().format("%d %b %H:%M").to_string()
+                        Local::now().format("%d%m %H%M.%S").to_string()
                 )
             ).reply_markup(InlineKeyboardMarkup::new(cloned_keyboard)),
             username
@@ -212,7 +212,7 @@ async fn display_application_edit_prompt(
                         &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
                         &application.chat_username,
                         if admin == true { "YES" } else { "NO" },
-                        Local::now().format("%d %b %H:%M").to_string()
+                        Local::now().format("%d%m %H%M.%S").to_string()
                 )
             ).reply_markup(InlineKeyboardMarkup::new(options)).await {
                 Ok(edited_msg) => Some(edited_msg.id),
