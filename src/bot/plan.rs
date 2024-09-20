@@ -1,7 +1,7 @@
 use super::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, utils};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
 use chrono::NaiveDate;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -487,6 +487,19 @@ pub(super) async fn plan_view(
 
                                 ).await {
                                     Ok(availability_details) => {
+                                        // notify planned
+                                        notifier::emit::plan_notifications(
+                                            &bot,
+                                            format!(
+                                                "{}{} has been planned for {} on {}",
+                                                availability_details.ops_name,
+                                                if availability_details.usr_type == UsrType::NS {" (NS)"} else {""},
+                                                availability_details.ict_type.as_ref(),
+                                                availability_details.avail.format("%Y-%m-%d")
+                                            ).as_str(),
+                                            &pool,
+                                        ).await;
+
                                         send_msg(
                                             bot.send_message(dialogue.chat_id(), format!(
                                                 "{} {} for {}",

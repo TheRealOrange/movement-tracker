@@ -39,7 +39,7 @@ async fn main() {
 
     // Start the notifier task
     tokio::spawn(async move {
-        notifier::start_notifier(notifier_bot, notifier_conn_pool).await;
+        notifier::scheduled::start_notifier(notifier_bot, notifier_conn_pool).await;
     });
 
     // Start the bot

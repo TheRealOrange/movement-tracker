@@ -1,7 +1,7 @@
 use crate::bot::state::State;
 use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
-use crate::types::{Availability, AvailabilityDetails, Ict};
-use crate::{controllers, log_endpoint_hit, utils};
+use crate::types::{Availability, AvailabilityDetails, Ict, UsrType};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::types::chrono::NaiveDate;
@@ -240,6 +240,33 @@ async fn delete_availability_entry_and_go_back(
             if user.id == availability_entry.user_id {
                 match controllers::scheduling::set_user_unavail(&pool, availability_entry.id).await {
                     Ok(details) => {
+                        // notify availability
+                        notifier::emit::availability_notifications(
+                            &bot,
+                            format!(
+                                "{}{} has specified they are UNAVAIL on {}",
+                                details.ops_name,
+                                if details.usr_type == UsrType::NS {" (NS)"} else {""},
+                                details.avail.format("%Y-%m-%d")
+                            ).as_str(),
+                            &pool,
+                        ).await;
+
+                        // detect conflicts and notify
+                        if details.planned {
+                            notifier::emit::conflict_notifications(
+                                &bot,
+                                format!(
+                                    "{}{} has specified they are UNAVAIL on {}, but they are PLANNED{}",
+                                    details.ops_name,
+                                    if details.usr_type == UsrType::NS {" (NS)"} else {""},
+                                    details.avail.format("%Y-%m-%d"),
+                                    if details.saf100 { " SAF100 ISSUED" } else { "" }
+                                ).as_str(),
+                                &pool,
+                            ).await;
+                        }
+
                         send_msg(
                             bot.send_message(dialogue.chat_id(), format!("Deleted entry for: {}", details.avail.format("%b-%d").to_string())),
                             username,
@@ -313,6 +340,19 @@ async fn modify_availability_and_go_back(
             if user.id == availability_entry.user_id {
                 match controllers::scheduling::edit_avail_by_uuid(&pool, availability_entry.id, None, ict_type_edit, remark_edit).await {
                     Ok(updated) => {
+                        notifier::emit::availability_notifications(
+                            &bot,
+                            format!(
+                                "{}{} has specified they are AVAIL for {} on {}{}",
+                                updated.ops_name,
+                                if updated.usr_type == UsrType::NS {" (NS)"} else {""},
+                                updated.ict_type.as_ref(),
+                                updated.avail.format("%Y-%m-%d"),
+                                if updated.remarks.is_some() { "\nRemarks: ".to_owned()+updated.remarks.as_deref().unwrap_or("none") } else { "".to_string() }
+                            ).as_str(),
+                            &pool,
+                        ).await;
+
                         send_msg(
                             bot.send_message(dialogue.chat_id(), format!(
                                 "Updated entry for: {} to\nType: {}\nRemarks: {}", 
@@ -363,7 +403,21 @@ async fn register_availability(
             username,
         ).await;
     } else {
-        let added_dates = added.into_iter().map(|availability| availability.avail).collect();
+        let added_dates = added.clone().into_iter().map(|availability| availability.avail).collect();
+
+        notifier::emit::availability_notifications(
+            &bot,
+            format!(
+                "{}{} has specified they are AVAIL for {} on the following dates:\n{}{}",
+                added[0].ops_name,
+                if added[0].usr_type == UsrType::NS {" (NS)"} else {""},
+                avail_type.as_ref(),
+                utils::format_dates_as_markdown(&added_dates),
+                if remarks.is_some() { "\nRemarks: ".to_owned()+remarks.as_deref().unwrap_or("\nnone") } else { "".to_string() }
+            ).as_str(),
+            &pool,
+        ).await;
+
         send_msg(
             bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
             username,

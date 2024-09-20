@@ -1,7 +1,7 @@
 use super::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit};
+use crate::{controllers, log_endpoint_hit, notifier};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
@@ -311,13 +311,22 @@ pub(super) async fn register_complete(
                     &pool,
                     q.from.id.0,
                     q.from.full_name(),
-                    name,
-                    ops_name,
+                    name.clone(),
+                    ops_name.clone(),
                     role_type,
                     user_type,
                 )
                     .await {
                     Ok(true) => {
+                        notifier::emit::register_notifications(
+                            &bot,
+                            format!(
+                                "User @{} has applied:\nOPS NAME:{}\nNAME:{}",
+                                &q.from.username.as_deref().unwrap_or("none"), ops_name, name
+                            ).as_str(),
+                            &pool,
+                        ).await;
+
                         send_msg(
                             bot.send_message(dialogue.chat_id(), "Registered successfully, please wait for approval."),
                             &q.from.username,

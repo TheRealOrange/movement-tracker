@@ -6,7 +6,7 @@ use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
-use crate::{controllers, log_endpoint_hit, utils};
+use crate::{controllers, log_endpoint_hit};
 use crate::bot::state::State;
 use crate::types::NotificationSettings;
 

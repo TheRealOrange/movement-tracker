@@ -105,3 +105,163 @@ pub(crate) async fn update_notification_settings(
         }
     }
 }
+
+pub(crate) async fn get_system_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE notif_system = TRUE AND is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with system notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with system notifications were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn get_register_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE notif_register = TRUE AND is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with register notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with register notifications were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn get_availability_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE notif_availability = TRUE AND is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with availability notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with availability notifications were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn get_plan_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE notif_plan = TRUE AND is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with plan notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with plan notifications were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn get_conflict_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE notif_conflict = TRUE AND is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with conflict notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with conflict notifications were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
+            Err(e)
+        }
+    }
+}
