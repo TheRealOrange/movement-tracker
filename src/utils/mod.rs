@@ -148,3 +148,27 @@ pub(crate) fn escape_special_characters(input: &str) -> String {
 
     escaped_string
 }
+
+pub(crate) const MAX_NAME_LENGTH: usize = 64;
+pub(crate) const MAX_OPS_NAME_LENGTH: usize = 10;
+
+pub(crate) fn is_valid_name(name: &str) -> bool {
+    name.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+}
+
+pub(crate) fn is_valid_ops_name(name: &str) -> bool {
+    name.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+}
+
+pub(crate) fn cleanup_name(name: &str) -> String {
+    // Trim the input (left and right)
+    let trimmed_name = name.trim();
+
+    // Replace multiple spaces with a single space
+    let single_spaced_name = trimmed_name
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ");
+
+    single_spaced_name
+}

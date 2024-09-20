@@ -210,3 +210,36 @@ pub(crate) async fn get_apply_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<
         }
     }
 }
+
+pub(crate) async fn user_has_pending_application(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM apply
+            WHERE is_valid = TRUE
+            AND tele_id = $1
+        ) AS "exists!"
+        "#,
+        tele_id as i64
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            let exists = res.exists;
+
+            if exists {
+                log::info!("User with telegram_id: ({}) has a pending application.", tele_id);
+            } else {
+                log::info!("User with telegram_id: ({}) does not have a pending application.", tele_id);
+            }
+
+            Ok(exists)
+        }
+        Err(e) => {
+            log::error!("Error checking pending application for telegram_id {}: {}", tele_id, e);
+            Err(e)
+        }
+    }
+}

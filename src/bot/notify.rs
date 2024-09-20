@@ -12,8 +12,7 @@ use crate::types::NotificationSettings;
 
 fn format_notification_settings(settings: &NotificationSettings) -> String {
     format!(
-        "\\- System Notifications: {}\n\\- Register Notifications: {}\n\\- Availability Notifications: {}\n\\- Plan Notifications: {}\n\\- Conflict Notifications: {}\n\n\
-        *Use the buttons below to toggle these settings\\.*",
+        "\\- System Notifications: {}\n\\- Register Notifications: {}\n\\- Availability Notifications: {}\n\\- Plan Notifications: {}\n\\- Conflict Notifications: {}",
         if settings.notif_system { "🟢 *ON*" } else { "🔴 *OFF*" },
         if settings.notif_register { "🟢 *ON*" } else { "🔴 *OFF*" },
         if settings.notif_availability { "🟢 *ON*" } else { "🔴 *OFF*" },
@@ -59,7 +58,7 @@ async fn display_inchat_config_notification(bot: &Bot, chat_id: ChatId, username
 
 async fn display_dm_config_notification(bot: &Bot, chat_id: ChatId, username: &Option<String>, notification_settings: &NotificationSettings, prefix: &String) -> Option<MessageId> {
     let message_text = format!(
-        "Configure the notification settings for the chat:\n{}", 
+        "Configure the notification settings for the chat:\n{}\n\n*Use the buttons below to toggle these settings\\.*",
         format_notification_settings(&notification_settings)
     );
 
@@ -211,9 +210,9 @@ pub(super) async fn notify_settings(
                             Ok(settings) => {
                                 send_msg(
                                     bot.send_message(dialogue.chat_id(), format!(
-                                        "Updated notification settings for chat: {}",
+                                        "Updated notification settings for chat:\n{}",
                                         format_notification_settings(&settings)
-                                    )),
+                                    )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
                                     &q.from.username,
                                 ).await;
                                 
@@ -223,7 +222,7 @@ pub(super) async fn notify_settings(
                                             "@{} has updated notification settings for chat: {}",
                                             &q.from.username.as_deref().unwrap_or("none"),
                                             format_notification_settings(&settings)
-                                        )),
+                                        )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
                                         &q.from.username,
                                     ).await;
                                 }
