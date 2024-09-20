@@ -43,6 +43,7 @@ pub(super) enum State {
     },
     // States used for looking through and approving applications
     ApplyView {
+        msg_id: MessageId,
         applications: Vec<Apply>,
         prefix: String,
         start: usize
@@ -204,7 +205,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::RegisterType { role_type }].endpoint(register_type))
         .branch(case![State::RegisterComplete { role_type, user_type, name, ops_name }].endpoint(register_complete))
         .branch(dptree::filter_async(check_admin_callback)
-            .branch(case![State::ApplyView { applications, prefix, start }].endpoint(apply_view))
+            .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(apply_view))
             .branch(case![State::ApplyEditPrompt { application, admin }].endpoint(apply_edit_prompt))
             .branch(case![State::ApplyEditRole { application, admin }].endpoint(apply_edit_role))
             .branch(case![State::ApplyEditType { application, admin }].endpoint(apply_edit_type))

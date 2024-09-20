@@ -11,8 +11,60 @@ use std::str::FromStr;
 use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
 
+// Generates the inline keyboard for applications with pagination
+fn get_applications_keyboard(
+    prefix: &String,
+    applications: &Vec<Apply>,
+    start: usize,
+    show: usize
+) -> Result<InlineKeyboardMarkup, ()> {
+    let total = applications.len();
+    let slice_end = min(start + show, total);
+    let shown_entries = match applications.get(start..slice_end) {
+        Some(entries) => entries,
+        None => {
+            log::error!("Cannot get applications slice");
+            return Err(());
+        }
+    };
+
+    let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries
+        .iter()
+        .map(|entry| {
+            vec![InlineKeyboardButton::callback(
+                entry.ops_name.clone(),
+                format!("{}{}", prefix, entry.id)
+            )]
+        })
+        .collect();
+
+    // Add "PREV", "NEXT", and "CANCEL" buttons
+    let mut pagination = Vec::new();
+    if start > 0 {
+        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+    }
+    if slice_end < total {
+        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
+    }
+    pagination.push(InlineKeyboardButton::callback("CANCEL", "CANCEL"));
+
+    entries.push(pagination);
+
+    Ok(InlineKeyboardMarkup::new(entries))
+}
+
+// Generates the message text for applications with pagination
+fn get_applications_text(
+    start: usize,
+    slice_end: usize,
+    total: usize
+) -> String {
+    format!("Showing applications {} to {} of {}", start + 1, slice_end, total)
+}
+
+// Displays applications with pagination using message editing
 async fn display_applications(
     bot: &Bot,
     chat_id: ChatId,
@@ -20,46 +72,57 @@ async fn display_applications(
     applications: &Vec<Apply>,
     prefix: &String,
     start: usize,
-    show: usize
-) -> Result<(), ()> {
-    let slice_end = min(start+show, applications.len()-1);
-    let shown_entries = if let Some(shown_entries) = applications.get(start..slice_end+1) {
-        shown_entries
-    } else {
-        log::error!("Cannot get user from message");
-        send_msg(
-            bot.send_message(chat_id, "Error encountered while getting applications"),
-            username
-        ).await;
-        return Err(());
+    show: usize,
+    msg_id: Option<MessageId>, // Optionally provide MessageId to edit
+) -> Result<MessageId, ()> {
+    let total = applications.len();
+    let slice_end = min(start + show, total);
+
+    // Generate the inline keyboard
+    let markup = match get_applications_keyboard(prefix, applications, start, show) {
+        Ok(kb) => kb,
+        Err(_) => {
+            send_msg(
+                bot.send_message(chat_id, "Error encountered while generating keyboard."),
+                username,
+            ).await;
+            return Err(());
+        }
     };
 
-    let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries.into_iter()
-        .map(|entry| vec![InlineKeyboardButton::callback(&(entry.ops_name), prefix.to_owned() + &entry.id.to_string())])
-        .collect();
+    // Generate the message text
+    let message_text = get_applications_text(start, slice_end, total);
 
-    // Add "NEXT" and "PREV" buttons
-    let mut pagination = Vec::new();
-    if start != 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+    // Send or edit the message
+    match msg_id {
+        Some(id) => {
+            // Edit the existing message
+            match bot.edit_message_text(chat_id, id, message_text)
+                .reply_markup(markup)
+                .await
+            {
+                Ok(_) => Ok(id),
+                Err(e) => {
+                    log::error!("Failed to edit message: {}", e);
+                    Err(())
+                }
+            }
+        }
+        None => {
+            // Send a new message
+            match send_msg(
+                bot.send_message(chat_id, message_text)
+                    .reply_markup(markup),
+                username
+            ).await {
+                Some(sent_msg) => Ok(sent_msg),
+                None => Err(())
+            }
+        }
     }
-    if slice_end != applications.len()-1 {
-        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
-    }
-    pagination.push(InlineKeyboardButton::callback("CANCEL", "CANCEL"));
-
-    // Combine entries with pagination
-    entries.push(pagination);
-
-    send_msg(
-        bot.send_message(chat_id, format!("Showing applications {} to {}", start+1, slice_end+1))
-            .reply_markup(InlineKeyboardMarkup::new(entries)),
-        username
-    ).await;
-
-    Ok(())
 }
 
+// Handles re-showing options during pagination
 async fn handle_re_show_options(
     bot: &Bot,
     dialogue: &MyDialogue,
@@ -68,15 +131,23 @@ async fn handle_re_show_options(
     prefix: String,
     start: usize,
     show: usize,
+    msg_id: MessageId, // Existing MessageId to edit
 ) -> HandlerResult {
-    match display_applications(bot, dialogue.chat_id(), &username, &applications, &prefix, start, show).await {
-        Err(_) => {
-            dialogue.update(State::ErrorState).await?;
+    match display_applications(
+        bot,
+        dialogue.chat_id(),
+        username,
+        &applications,
+        &prefix,
+        start,
+        show,
+        Some(msg_id),
+    ).await {
+        Ok(msg_id) => {
+            log::debug!("Updated ApplyView with MsgId: {:?}, Start: {}", msg_id, start);
+            dialogue.update(State::ApplyView { msg_id, applications, prefix, start }).await?;
         }
-        Ok(_) => {
-            log::debug!("Transitioning to ApplyView with Applications: {:?}, Prefix: {:?}, Start: {:?}", applications, prefix, start);
-            dialogue.update(State::ApplyView { applications, prefix, start }).await?;
-        }
+        Err(_) => dialogue.update(State::ErrorState).await?,
     };
     Ok(())
 }
@@ -204,11 +275,11 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
                 .map(char::from)
                 .collect();
 
-            match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, 8)
+            match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, 8, None)
                 .await {
-                Ok(_) => {
-                    log::debug!("Transitioning to ApplyView with Applications: {:?}, Prefix: {:?}, Start: {:?}", applications, prefix, 0);
-                    dialogue.update(State::ApplyView { applications, prefix, start: 0 }).await?
+                Ok(msg_id) => {
+                    log::debug!("Transitioning to ApplyView with MsgId: {:?}, Applications: {:?}, Prefix: {:?}, Start: {:?}", msg_id, applications, prefix, 0);
+                    dialogue.update(State::ApplyView { msg_id, applications, prefix, start: 0 }).await?
                 },
                 Err(_) => dialogue.update(State::ErrorState).await?
             };
@@ -222,7 +293,7 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
 pub(super) async fn apply_view(
     bot: Bot,
     dialogue: MyDialogue,
-    (applications, prefix, start): (Vec<Apply>, String, usize),
+    (msg_id, applications, prefix, start): (MessageId, Vec<Apply>, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
@@ -239,14 +310,14 @@ pub(super) async fn apply_view(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8, msg_id).await?;
         }
         Some(option) => {
             if option == "PREV" {
-                handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, max(0, start-8), 8).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, max(0, start-8), 8, msg_id).await?;
             } else if option == "NEXT" {
                 let entries_len = applications.len();
-                handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, if start+8 < entries_len { start+8 } else { start }, 8).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, if start+8 < entries_len { start+8 } else { start }, 8, msg_id).await?;
             } else if option == "CANCEL" {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Operation cancelled."),
@@ -255,7 +326,7 @@ pub(super) async fn apply_view(
                 dialogue.update(State::Start).await?
             } else {
                 match option.strip_prefix(&prefix) {
-                    None => handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8).await?,
+                    None => handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8, msg_id).await?,
                     Some(id) => {
                         match Uuid::try_parse(&id) {
                             Ok(parsed_id) => {
@@ -268,7 +339,7 @@ pub(super) async fn apply_view(
                                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
                                 }
                             }
-                            Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8).await?,
+                            Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, start, 8, msg_id).await?,
                         }
                     }
                 }
