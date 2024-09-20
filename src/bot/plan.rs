@@ -597,7 +597,7 @@ pub(super) async fn plan(
             } else {
                 // unable to interpret as OPS NAME, interpreting as date
                 match utils::parse_single_date(ops_name_or_date.as_ref()) {
-                    Some(selected_date) => {
+                    Ok(selected_date) => {
                         // show the available users on that day
                         let today = chrono::Local::now().naive_local().date();
                         if selected_date < today {
@@ -627,7 +627,7 @@ pub(super) async fn plan(
                             Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
                         }
                     }
-                    None => {
+                    Err(_) => {
                         // Neither an OPS NAME nor a valid date
                         send_msg(
                             bot.send_message(

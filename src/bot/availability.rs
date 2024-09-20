@@ -764,11 +764,12 @@ pub(super) async fn availability_add_change_type(
 pub(super) async fn availability_add_message(
     bot: Bot,
     dialogue: MyDialogue,
-    avail_type: Ict,
+    (msg_id, avail_type): (MessageId, Ict),
     msg: Message,
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_message", "Message", msg,
+        "MessageId" => msg_id,
         "Avail Type" => avail_type
     );
 
@@ -783,16 +784,54 @@ pub(super) async fn availability_add_message(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_dates) => {
-            // parse date here into Vec<NaiveDate>
-            let parsed_dates = utils::parse_dates(input_dates.as_str());
-            // display to the user the dates they have entered
-            let output_str = utils::format_dates_as_markdown(&parsed_dates);
-            send_msg(
-                bot.send_message(dialogue.chat_id(), format!("Indicated:\n{}", output_str)),
-                &user.username,
-            ).await;
-            display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
-            dialogue.update(State::AvailabilityAddRemarks { avail_type, avail_dates: parsed_dates }).await?
+            // Inside your async function where you handle the date parsing
+            let (parsed_dates, failed_dates) = utils::parse_dates(input_dates.as_str());
+
+            // Prepare the output for successfully parsed dates
+            let output_str = if parsed_dates.is_empty() {
+                "You have no valid dates entered.".to_string()
+            } else {
+                utils::format_dates_as_markdown(&parsed_dates)
+            };
+
+            // Prepare the output for failed dates
+            let failed_output_str = if failed_dates.is_empty() {
+                "".to_string()
+            } else {
+                format!(
+                    "\n*Failed to parse the following dates:* {}\n",
+                    utils::format_failed_dates_as_markdown(&failed_dates)
+                )
+            };
+
+            // Combine the messages
+            let final_output = format!("*Indicated:*\n{}\n{}", output_str, failed_output_str);
+            
+            match bot.edit_message_text(dialogue.chat_id(), msg_id, final_output.clone()).await {
+                Ok(_) => {}
+                Err(e) => {
+                    log::error!("Failed to edit message ({}): {}", msg_id, e);
+                    // Send the combined message to the user if editing fails
+                    send_msg(
+                        bot.send_message(dialogue.chat_id(), final_output)
+                            .parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                        &user.username,
+                    ).await;
+                }
+            };
+
+            // Proceed if there are valid parsed dates
+            if !parsed_dates.is_empty() {
+                display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
+                dialogue.update(State::AvailabilityAddRemarks { avail_type, avail_dates: parsed_dates }).await?
+            } else {
+                // Handle the case where no valid dates were parsed
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "No valid dates were provided. Please try again with correct formats.")
+                        .parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                    &user.username,
+                ).await;
+            }
         }
         None => {
             send_msg(

@@ -3,16 +3,19 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
 
+static FULL_MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?[-/\s]+(\d{4})\s*$")
+        .expect("Failed to compile FULL_MONTH_FIRST_PATTERN regex")
+});
+
 static DAY_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^\s*(\d{1,2})(?:st|nd|rd|th)?[-/\s]+([A-Za-z]+|\d{1,2})(?:[-/\s]+(\d{2,4}))?\s*$").unwrap()
+    Regex::new(r"(?i)^\s*(\d{1,2})(?:st|nd|rd|th)?[-/\s]+([A-Za-z]+|\d{1,2})(?:[-/\s]+(\d{2,4}))?\s*$")
+        .expect("Failed to compile DAY_FIRST_PATTERN regex")
 });
 
 static MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?(?:[-/\s]+(\d{2,4}))?\s*$").unwrap()
-});
-
-static FULL_MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?[-/\s]+(\d{4})\s*$").unwrap()
+    Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?(?:[-/\s]+(\d{2,4}))?\s*$")
+        .expect("Failed to compile MONTH_FIRST_PATTERN regex")
 });
 
 static MONTHS_MAP: Lazy<HashMap<&'static str, u32>> = Lazy::new(|| {
@@ -29,24 +32,36 @@ static MONTHS_MAP: Lazy<HashMap<&'static str, u32>> = Lazy::new(|| {
         .collect()
 });
 
-pub(crate) fn parse_single_date(input: &str) -> Option<NaiveDate> {
+fn date_or_string(input: &str, today: NaiveDate, mut year: i32, month: u32, day: u32) -> Result<NaiveDate, String> {
+    if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
+        if valid_date < today {
+            year += 1;
+            valid_date = NaiveDate::from_ymd_opt(year, month, day).ok_or(input.to_string())?;
+        }
+        Ok(valid_date)
+    } else {
+        Err(input.to_string())
+    }
+}
+
+pub(crate) fn parse_single_date(input: &str) -> Result<NaiveDate, String> {
     let today = Local::now().naive_local().date();
     let current_year = today.year();
 
     // Try full month-first pattern with explicit year (e.g., May 17 2024, June 30th 2024)
     if let Some(caps) = FULL_MONTH_FIRST_PATTERN.captures(input) {
         let month_str = &caps[1];
-        let day = caps[2].parse::<u32>().ok()?;
+        let day = caps[2].parse::<u32>().map_err(|_| input.to_string())?;
         let year = caps[3].parse::<i32>().unwrap_or(current_year);
 
         let month_str_lower = month_str.to_lowercase();
-        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied()?;
+        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied().ok_or(input.to_string())?;
 
-        NaiveDate::from_ymd_opt(year, month, day)
+        NaiveDate::from_ymd_opt(year, month, day).ok_or(input.to_string())
     }
     // Try day-first pattern (e.g., 28/08, 1st Sept)
     else if let Some(caps) = DAY_FIRST_PATTERN.captures(input) {
-        let day = caps[1].parse::<u32>().ok()?;
+        let day = caps[1].parse::<u32>().map_err(|_| input.to_string())?;
         let month_str = &caps[2];
         let year_str = caps.get(3).map_or("", |m| m.as_str());
 
@@ -54,60 +69,51 @@ pub(crate) fn parse_single_date(input: &str) -> Option<NaiveDate> {
             month_num
         } else {
             let month_str_lower = month_str.to_lowercase();
-            MONTHS_MAP.get(month_str_lower.as_str()).copied()?
+            MONTHS_MAP.get(month_str_lower.as_str()).copied().ok_or(input.to_string())?
         };
 
-        let mut year = if !year_str.is_empty() {
+        let year = if !year_str.is_empty() {
             year_str.parse::<i32>().unwrap_or(current_year)
         } else {
             current_year
         };
 
-        if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
-            if valid_date < today {
-                year += 1;
-                valid_date = NaiveDate::from_ymd_opt(year, month, day)?;
-            }
-            Some(valid_date)
-        } else {
-            None
-        }
+        date_or_string(input, today, year, month, day)
     }
     // Try month-first pattern (e.g., November 2nd, Jul 4, Feb 23)
     else if let Some(caps) = MONTH_FIRST_PATTERN.captures(input) {
         let month_str = &caps[1];
-        let day = caps[2].parse::<u32>().ok()?;
+        let day = caps[2].parse::<u32>().map_err(|_| input.to_string())?;
         let year_str = caps.get(3).map_or("", |m| m.as_str());
 
         let month_str_lower = month_str.to_lowercase();
-        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied()?;
+        let month = MONTHS_MAP.get(month_str_lower.as_str()).copied().ok_or(input.to_string())?;
 
-        let mut year = if !year_str.is_empty() {
+        let year = if !year_str.is_empty() {
             year_str.parse::<i32>().unwrap_or(current_year)
         } else {
             current_year
         };
 
-        if let Some(mut valid_date) = NaiveDate::from_ymd_opt(year, month, day) {
-            if valid_date < today {
-                year += 1;
-                valid_date = NaiveDate::from_ymd_opt(year, month, day)?;
-            }
-            Some(valid_date)
-        } else {
-            None
-        }
+        date_or_string(input, today, year, month, day)
     } else {
         log::debug!("Failed to parse date string: '{}'", input);
-        None
+        Err(input.to_string())
     }
 }
 
-pub(crate) fn parse_dates(input: &str) -> Vec<NaiveDate> {
+pub(crate) fn parse_dates(input: &str) -> (Vec<NaiveDate>, Vec<String>) {
     input
         .split(',')
-        .filter_map(|s| parse_single_date(s.trim()))
-        .collect()
+        .map(|s| s.trim())
+        .map(|s| parse_single_date(s))
+        .fold((Vec::new(), Vec::new()), |mut acc, res| {
+            match res {
+                Ok(date) => acc.0.push(date),
+                Err(failed) => acc.1.push(failed),
+            }
+            acc
+        })
 }
 
 pub(crate) fn format_dates_as_markdown(dates: &Vec<NaiveDate>) -> String {
@@ -122,6 +128,16 @@ pub(crate) fn format_dates_as_markdown(dates: &Vec<NaiveDate>) -> String {
     }
 
     markdown_list
+}
+
+pub(crate) fn format_failed_dates_as_markdown(failed_dates: &[String]) -> String {
+    let mut formatted = String::new();
+    for date_str in failed_dates {
+        // Escape special characters to prevent Markdown parsing issues
+        let escaped_str = escape_special_characters(date_str);
+        formatted.push_str(&format!("- {}\n", escaped_str));
+    }
+    formatted
 }
 
 pub(crate) fn add_month_safe(date: NaiveDate, months: u32) -> NaiveDate {
