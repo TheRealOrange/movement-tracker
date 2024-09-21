@@ -177,7 +177,7 @@ fn format_detailed_notification(availability: &Availability, user: &Usr) -> Resu
     }
 
     // Add any additional information if necessary
-    message.push_str("\nPlease ensure all preparations are complete.");
+    message.push_str("\nPlease wait for the flight schedule to be sent\\.");
 
     Ok(message)
 }

@@ -7,7 +7,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use sqlx::types::Uuid;
 use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
-use crate::{controllers, log_endpoint_hit};
+use crate::{controllers, log_endpoint_hit, notifier};
 use crate::types::{Availability, AvailabilityDetails};
 
 fn get_paginated_keyboard(
@@ -480,6 +480,16 @@ pub(super) async fn saf100_confirm(
         "YES" => {
             match controllers::attendance::set_saf100_true_by_uuid(&pool, availability.id).await {
                 Ok(details) => {
+                    notifier::emit::system_notifications(
+                        &bot,
+                        format!(
+                            "User @{} has confirmed SAF100 issued for {} on {}",
+                            &q.from.username.as_deref().unwrap_or("none"), details.ops_name, details.avail.format("%Y-%m-%d")
+                        ).as_str(),
+                        &pool,
+                        q.from.id.0 as i64
+                    ).await;
+                    
                     match bot.edit_message_text(
                         dialogue.chat_id(), msg_id, 
                         format!("SAF100 confirmed issued for {} on {}", details.ops_name, details.avail.format("%Y-%m-%d"))

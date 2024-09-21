@@ -22,7 +22,7 @@ async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originat
     }
 }
 
-pub(crate) async fn system_notifications(bot: &Bot, message: &str, pool: &PgPool) {
+pub(crate) async fn system_notifications(bot: &Bot, message: &str, pool: &PgPool, originator_id: i64) {
     match controllers::notifications::get_system_notifications_enabled(pool).await {
         Ok(chats) => {
             if chats.is_empty() {
@@ -31,7 +31,7 @@ pub(crate) async fn system_notifications(bot: &Bot, message: &str, pool: &PgPool
             }
 
             log::info!("Sending system notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, None).await;
+            send_helper(bot, chats, message, Some(originator_id)).await;
         }
         Err(e) => {
             log::error!("Failed to retrieve system notification settings: {}", e);

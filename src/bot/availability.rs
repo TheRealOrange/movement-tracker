@@ -1,5 +1,5 @@
 use crate::bot::state::State;
-use crate::bot::{handle_error, log_try_delete_msg, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::types::{Availability, AvailabilityDetails, Ict, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use rand::distributions::Alphanumeric;
@@ -10,8 +10,7 @@ use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::str::FromStr;
 use teloxide::prelude::*;
-use teloxide::RequestError;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MaybeInaccessibleMessage, MessageId, True};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 
 fn get_availability_edit_keyboard(
     availability: &Vec<Availability>,
@@ -152,42 +151,6 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
     ).await
 }
 
-async fn display_availability_edit(
-    bot: &Bot,
-    chat_id: ChatId,
-    username: &Option<String>,
-    availability: &Vec<Availability>,
-    prefix: &String,
-    start: usize,
-    show: usize,
-    action: &String
-) -> Result<MessageId, ()> {
-    // Generate the inline keyboard
-    let markup = match get_availability_edit_keyboard(availability, prefix, start, show) {
-        Ok(kb) => kb,
-        Err(_) => {
-            send_msg(
-                bot.send_message(chat_id, "Error encountered while getting availability."),
-                username,
-            ).await;
-            return Err(());
-        }
-    };
-
-    // Generate the message text
-    let message_text = get_availability_edit_text(availability, start, show, action);
-
-    // Send the message and capture the MessageId
-    match send_msg(
-        bot.send_message(chat_id, message_text)
-            .reply_markup(markup),
-        username
-    ).await {
-        Some(msg_id) => Ok(msg_id),
-        None => Err(())
-    }
-}
-
 async fn update_availability_edit(
     bot: &Bot,
     chat_id: ChatId,
@@ -198,7 +161,7 @@ async fn update_availability_edit(
     show: usize,
     action: &String,
     msg_id: &MessageId
-) -> Result<(), ()> {
+) -> Result<Option<MessageId>, ()> {
     // Generate the inline keyboard
     let markup = match get_availability_edit_keyboard(availability, prefix, start, show) {
         Ok(kb) => kb,
@@ -212,41 +175,25 @@ async fn update_availability_edit(
     };
 
     // Edit both text and reply markup in one call
-    match bot.edit_message_text(chat_id, *msg_id, get_availability_edit_text(availability, start, show, action))
-        .reply_markup(markup)
+    Ok(match bot.edit_message_text(chat_id, *msg_id, get_availability_edit_text(availability, start, show, action))
+        .reply_markup(markup.clone())
         .await {
-        Ok(_) => {}
+        Ok(edit_msg) => Some(edit_msg.id),
         Err(e) => {
             log::error!(
                 "Error editing msg in response to user: {}, error: {}",
                 username.as_deref().unwrap_or("none"),
                 e
             );
+            // Failed to edit, send a new message
+            log_try_delete_msg(&bot, chat_id, *msg_id).await;
+            send_msg(
+                bot.send_message(chat_id, get_availability_edit_text(availability, start, show, action))
+                    .reply_markup(markup),
+                username,
+            ).await
         }
-    };
-
-    Ok(())
-}
-
-async fn handle_show_options(
-    bot: &Bot,
-    dialogue: &MyDialogue,
-    username: &Option<String>,
-    availability_list: Vec<Availability>,
-    prefix: String,
-    start: usize,
-    show: usize,
-    action: String,
-) -> HandlerResult {
-    match display_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action)
-        .await {
-        Err(_) => dialogue.update(State::ErrorState).await?,
-        Ok(msg_id) => {
-            log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
-            dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?;
-        }
-    }
-    Ok(())
+    })
 }
 
 async fn handle_re_show_options(
@@ -262,9 +209,14 @@ async fn handle_re_show_options(
 ) -> HandlerResult {
     match update_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action, &msg_id).await {
         Err(_) => dialogue.update(State::ErrorState).await?,
-        Ok(_) => {
-            log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
-            dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?;
+        Ok(new_msg_id) => {
+            match new_msg_id {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(msg_id) => {
+                    log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
+                    dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?
+                }
+            }
         }
     };
     Ok(())
@@ -274,8 +226,9 @@ async fn display_availability_edit_prompt(
     bot: &Bot,
     chat_id: ChatId,
     username: &Option<String>,
-    availability_entry: &Availability
-) {
+    availability_entry: &Availability,
+    msg_id: MessageId
+) -> Option<MessageId> {
     let edit: Vec<InlineKeyboardButton> = ["TYPE", "REMARKS"]
         .into_iter()
         .map(|option| InlineKeyboardButton::callback(option, option))
@@ -286,25 +239,33 @@ async fn display_availability_edit_prompt(
         .collect();
     
     let formatted_date = availability_entry.avail.format("%b-%d").to_string();
-    send_msg(
-        bot.send_message(
-            chat_id,
-            format!(
-                "You have indicated availability for: {}\nType: {}\nRemarks: {}\n\n What do you wish to edit?", 
-                formatted_date,
-                availability_entry.ict_type.as_ref(),
-                availability_entry.remarks.as_deref().unwrap_or("None")
-            )
-        )
-            .reply_markup(InlineKeyboardMarkup::new([edit, options])),
-        username
-    ).await;
+    let availability_edit_text = format!(
+        "You have indicated availability for: {}\nType: {}\nRemarks: {}\n\n What do you wish to edit?",
+        formatted_date,
+        availability_entry.ict_type.as_ref(),
+        availability_entry.remarks.as_deref().unwrap_or("None")
+    );
+    
+    let keyboard = InlineKeyboardMarkup::new([edit, options]);
+    
+    match bot.edit_message_text(chat_id, msg_id, &availability_edit_text)
+        .reply_markup(keyboard.clone()).await {
+        Ok(edit_msg) => Some(edit_msg.id),
+        Err(e) => {
+            log::error!("Failed to edit message ({}): {}", msg_id, e);
+            log_try_delete_msg(&bot, chat_id, msg_id).await;
+            send_msg(
+                bot.send_message(chat_id, availability_edit_text)
+                    .reply_markup(keyboard),
+                username
+            ).await
+        }
+    }
 }
 
 async fn display_edit_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let ict_types = [Ict::LIVE, Ict::OTHER]
         .map(|ict_types| InlineKeyboardButton::callback(ict_types.as_ref(), ict_types.as_ref()));
-
     send_msg(
         bot.send_message(chat_id, "Available for:")
             .reply_markup(InlineKeyboardMarkup::new([ict_types])),
@@ -312,11 +273,11 @@ async fn display_edit_types(bot: &Bot, chat_id: ChatId, username: &Option<String
     ).await
 }
 
-async fn display_edit_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_edit_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     send_msg(
         bot.send_message(chat_id, "Type your remarks:"),
         username,
-    ).await;
+    ).await
 }
 
 async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, username: &Option<String>, msg_id: MessageId) -> Option<MessageId> {
@@ -330,28 +291,18 @@ async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, u
         Ok(_) => Some(msg_id),
         Err(e) => {
             log::error!("Failed to edit message text in response to {}: {}", username.as_deref().unwrap_or("none"), e);
-            match bot.send_message(chat_id, format!(
-                "Available for: {}\n\nType the dates for which you want to indicate availability. Use commas(only) to separate dates. (e.g. Jan 2, 28/2, 17/04/24)",
-                avail_type.as_ref())
-            ).reply_markup(InlineKeyboardMarkup::new([edit])).await {
-                Ok(msg) => Some(msg.id),
-                Err(_) => None
-            }
+            // Failed to edit, send a new message
+            log_try_delete_msg(&bot, chat_id, msg_id).await;
+            
+            send_msg(
+                bot.send_message(chat_id, format!(
+                    "Available for: {}\n\nType the dates for which you want to indicate availability. Use commas(only) to separate dates. (e.g. Jan 2, 28/2, 17/04/24)",
+                    avail_type.as_ref())
+                ).reply_markup(InlineKeyboardMarkup::new([edit])),
+                username
+            ).await
         }
     }
-}
-
-async fn display_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, username: &Option<String>) -> Option<MessageId> {
-    let edit = ["CHANGE TYPE", "CANCEL"]
-        .map(|option| InlineKeyboardButton::callback(option, option));
-
-    send_msg(
-        bot.send_message(chat_id, format!(
-            "Available for: {}\n\nType the dates for which you want to indicate availability. Use commas(only) to separate dates. (e.g. Jan 2, 28/2, 17/04/24)",
-            avail_type.as_ref())
-        ).reply_markup(InlineKeyboardMarkup::new([edit.clone()])),
-        username
-    ).await
 }
 
 async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
@@ -374,7 +325,8 @@ async fn delete_availability_entry_and_go_back(
     start: usize,
     show: usize,
     action: String,
-    pool: &PgPool
+    pool: &PgPool,
+    msg_id: MessageId
 ) -> HandlerResult {
     
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
@@ -414,7 +366,7 @@ async fn delete_availability_entry_and_go_back(
                             bot.send_message(dialogue.chat_id(), format!("Deleted entry for: {}", details.avail.format("%b-%d").to_string())),
                             username,
                         ).await;
-                        handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool).await?;
+                        handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool, msg_id).await?;
                     }
                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
                 }
@@ -436,7 +388,8 @@ async fn handle_go_back(
     start: usize,
     show: usize,
     action: String,
-    pool: &PgPool
+    pool: &PgPool,
+    msg_id: MessageId
 ) -> HandlerResult {
     
     // Generate random prefix to make the IDs only applicable to this dialogue instance
@@ -459,7 +412,7 @@ async fn handle_go_back(
                 };
             } else {
                 let new_start = if start >= availability_list.len() { max(0, availability_list.len() - show) } else { start };
-                handle_show_options(bot, dialogue, username, availability_list, prefix, new_start, show, action).await?;
+                handle_re_show_options(bot, dialogue, username, availability_list, prefix, new_start, show, action, msg_id).await?;
             }
         }
         Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
@@ -479,7 +432,8 @@ async fn modify_availability_and_go_back(
     action: String,
     ict_type_edit: Option<Ict>,
     remark_edit: Option<String>,
-    pool: &PgPool
+    pool: &PgPool,
+    msg_id: MessageId
 ) -> HandlerResult {
     
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
@@ -510,7 +464,7 @@ async fn modify_availability_and_go_back(
                             )),
                             username,
                         ).await;
-                        handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool).await?;
+                        handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool, msg_id).await?;
                     }
                     Err(_) => {}
                 }
@@ -532,7 +486,8 @@ async fn register_availability(
     avail_dates: &Vec<NaiveDate>,
     avail_type: &Ict,
     remarks: Option<String>,
-    pool: &PgPool
+    pool: &PgPool,
+    msg_id: MessageId
 ) {
     // Add the availability to the database for each date
     let mut added: Vec<AvailabilityDetails> = Vec::new();
@@ -546,10 +501,15 @@ async fn register_availability(
     }
 
     if added.is_empty() {
-        send_msg(
-            bot.send_message(dialogue.chat_id(), "Error, added no dates."),
-            username,
-        ).await;
+        match bot.edit_message_text(dialogue.chat_id(), msg_id, "Error, added no dates.").await {
+            Ok(_) => {}
+            Err(_) => {
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "Error, added no dates."),
+                    username,
+                ).await;
+            }
+        }
     } else {
         let added_dates = added.clone().into_iter().map(|availability| availability.avail).collect();
 
@@ -567,10 +527,15 @@ async fn register_availability(
             tele_id as i64
         ).await;
 
-        send_msg(
-            bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
-            username,
-        ).await;
+        match bot.edit_message_text(dialogue.chat_id(), msg_id, format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))).await {
+            Ok(_) => {}
+            Err(_) => {
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), format!("Added the following dates:\n{}", utils::format_dates_as_markdown(&added_dates))),
+                    username,
+                ).await;
+            }
+        }
     }
 }
 
@@ -647,7 +612,7 @@ pub(super) async fn availability_view(
                 };
             } else if option == "MODIFY" || option == "DELETE" {
                 let action = option.clone();
-                handle_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, msg_id).await?;
             } else if option == "DONE" {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Returned to start."),
@@ -684,7 +649,6 @@ pub(super) async fn availability_add_callback(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, msg_id).await;
         }
         Some(option) => {
             if option == "CHANGE TYPE" {
@@ -731,7 +695,6 @@ pub(super) async fn availability_add_change_type(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(option) => {
             match Ict::from_str(&option) {
@@ -744,7 +707,10 @@ pub(super) async fn availability_add_change_type(
                             Some(new_msg_id) => dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, avail_type }).await?
                         };
                     } else {
-                        display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), "Invalid option."),
+                            &q.from.username,
+                        ).await;
                     }
                 }
                 _ => {
@@ -752,7 +718,6 @@ pub(super) async fn availability_add_change_type(
                         bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
                         &q.from.username,
                     ).await;
-                    display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }
@@ -766,6 +731,7 @@ pub(super) async fn availability_add_message(
     dialogue: MyDialogue,
     (msg_id, avail_type): (MessageId, Ict),
     msg: Message,
+    pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_message", "Message", msg,
@@ -783,32 +749,68 @@ pub(super) async fn availability_add_message(
     };
 
     match msg.text().map(ToOwned::to_owned) {
-        Some(input_dates) => {
-            // Inside your async function where you handle the date parsing
-            let (parsed_dates, failed_dates) = utils::parse_dates(input_dates.as_str());
+        Some(input_dates_str) => {
+            // Parse the dates
+            let (parsed_dates, failed_parsing_dates) = utils::parse_dates(&input_dates_str);
 
-            // Prepare the output for successfully parsed dates
-            let output_str = if parsed_dates.is_empty() {
-                "You have no valid dates entered.".to_string()
-            } else {
-                utils::format_dates_as_markdown(&parsed_dates)
+            // Check availability for the parsed dates
+            let availability_results = match controllers::scheduling::check_user_avail_multiple(&pool, user.id.0, parsed_dates.clone()).await {
+                Ok(results) => results,
+                Err(e) => {
+                    log::error!("Error checking availability: {}", e);
+                    handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await;
+                    return Ok(());
+                }
             };
 
-            // Prepare the output for failed dates
-            let failed_output_str = if failed_dates.is_empty() {
-                "".to_string()
+            // Separate available and unavailable dates
+            let mut available_dates = Vec::new();      // Dates the user is available to register
+            let mut unavailable_dates = Vec::new();    // Dates the user has already registered
+
+            for (i, avail_opt) in availability_results.into_iter().enumerate() {
+                if let Some(avail) = avail_opt {
+                    unavailable_dates.push(avail.avail);
+                } else {
+                    available_dates.push(parsed_dates[i]);
+                }
+            }
+
+            // Prepare the output for available dates
+            let available_str = if available_dates.is_empty() {
+                "All the dates have already been registered.".to_string()
             } else {
                 format!(
-                    "\n*Failed to parse the following dates:* {}\n",
-                    utils::format_failed_dates_as_markdown(&failed_dates)
+                    "*Selected dates:* {}\n",
+                    utils::escape_special_characters(&utils::format_dates_as_markdown(&available_dates))
                 )
             };
 
+            // Prepare the output for failed parsing and unavailable dates
+            let mut failed_output_str = String::new();
+
+            if !failed_parsing_dates.is_empty() {
+                failed_output_str += &format!(
+                    "\n*Failed to parse the following dates:* {}\n",
+                    utils::escape_special_characters(&utils::format_failed_dates_as_markdown(&failed_parsing_dates))
+                );
+            }
+
+            if !unavailable_dates.is_empty() {
+                let unavailable_dates_str: Vec<String> = unavailable_dates.into_iter().map(|d| d.format("%m/%d/%Y").to_string()).collect();
+                failed_output_str += &format!(
+                    "\n*You have already indicated availability on the following dates. Please use the modify function instead:* {}\n",
+                    utils::escape_special_characters(&utils::format_failed_dates_as_markdown(&unavailable_dates_str))
+                );
+            }
+
             // Combine the messages
-            let final_output = format!("*Indicated:*\n{}\n{}", output_str, failed_output_str);
-            
-            match bot.edit_message_text(dialogue.chat_id(), msg_id, final_output.clone()).await {
-                Ok(_) => {}
+            let final_output = format!("*Indicated:*\n{}\n{}", available_str, failed_output_str);
+
+            // Attempt to edit the original message
+            let msg_id = match bot.edit_message_text(dialogue.chat_id(), msg_id, final_output.clone())
+                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                .await {
+                Ok(new_msg) => Some(new_msg.id),
                 Err(e) => {
                     log::error!("Failed to edit message ({}): {}", msg_id, e);
                     // Send the combined message to the user if editing fails
@@ -816,21 +818,28 @@ pub(super) async fn availability_add_message(
                         bot.send_message(dialogue.chat_id(), final_output)
                             .parse_mode(teloxide::types::ParseMode::MarkdownV2),
                         &user.username,
-                    ).await;
+                    ).await
                 }
             };
-
-            // Proceed if there are valid parsed dates
-            if !parsed_dates.is_empty() {
-                display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
-                dialogue.update(State::AvailabilityAddRemarks { avail_type, avail_dates: parsed_dates }).await?
-            } else {
-                // Handle the case where no valid dates were parsed
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "No valid dates were provided. Please try again with correct formats.")
-                        .parse_mode(teloxide::types::ParseMode::MarkdownV2),
-                    &user.username,
-                ).await;
+            
+            match msg_id {
+                None => {
+                    dialogue.update(State::ErrorState).await?;
+                }
+                Some(msg_id) => {
+                    // Proceed if there are available dates to register
+                    if !available_dates.is_empty() {
+                        display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
+                        dialogue.update(State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates: available_dates }).await?
+                    } else {
+                        // Handle the case where no available dates were provided or user is unavailable on all dates
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), "No available dates were provided or all provided dates have already been registered. Please try again with different dates.")
+                                .parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                            &user.username,
+                        ).await;
+                    }
+                }
             }
         }
         None => {
@@ -840,19 +849,20 @@ pub(super) async fn availability_add_message(
             ).await;
         }
     }
-    
+
     Ok(())
 }
 
 pub(super) async fn availability_add_remarks(
     bot: Bot,
     dialogue: MyDialogue,
-    (avail_type, avail_dates): (Ict, Vec<NaiveDate>),
+    (msg_id, avail_type, avail_dates): (MessageId, Ict, Vec<NaiveDate>),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_remarks", "Message", msg,
+        "MessageId" => msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
     );
@@ -869,7 +879,7 @@ pub(super) async fn availability_add_remarks(
     match msg.text().map(ToOwned::to_owned) {
         Some(input_remarks) => {
             // add availability to database with the specified remarks
-            register_availability(&bot, &dialogue, &user.username, user.id.0, &avail_dates, &avail_type, Some(input_remarks), &pool).await;
+            register_availability(&bot, &dialogue, &user.username, user.id.0, &avail_dates, &avail_type, Some(input_remarks), &pool, msg_id).await;
 
             dialogue.update(State::Start).await?;
         }
@@ -878,7 +888,6 @@ pub(super) async fn availability_add_remarks(
                 bot.send_message(dialogue.chat_id(), "Please, enter remarks, select DONE if none, or type /cancel to abort."),
                 &user.username,
             ).await;
-            display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
         }
     }
     
@@ -888,12 +897,13 @@ pub(super) async fn availability_add_remarks(
 pub(super) async fn availability_add_complete(
     bot: Bot,
     dialogue: MyDialogue,
-    (avail_type, avail_dates): (Ict, Vec<NaiveDate>),
+    (msg_id, avail_type, avail_dates): (MessageId, Ict, Vec<NaiveDate>),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_complete", "Callback", q,
+        "MessageId" => msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
     );
@@ -913,10 +923,11 @@ pub(super) async fn availability_add_complete(
         Some(option) => {
             if option == "DONE" {
                 // add availability to database with the specified remarks
-                register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool).await;
+                register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool, msg_id).await;
                 
                 dialogue.update(State::Start).await?
             } else if option == "CANCEL" {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                     &q.from.username,
@@ -987,11 +998,15 @@ pub(super) async fn availability_select(
                                 match controllers::scheduling::get_availability_by_uuid(&pool, parsed_id).await {
                                     Ok(availability_entry) => {
                                         if action == "MODIFY" {
-                                            display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry).await;
-                                            log::debug!("Transitioning to AvailabilityModify with Availability: {:?}, AvailabilityList: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", availability_entry, availability_list, action, prefix, start);
-                                            dialogue.update(State::AvailabilityModify { availability_entry, availability_list, action, prefix, start }).await?;
+                                            match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, msg_id).await {
+                                                None => dialogue.update(State::ErrorState).await?,
+                                                Some(msg_id) => {
+                                                    log::debug!("Transitioning to AvailabilityModify with Availability: {:?}, AvailabilityList: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", availability_entry, availability_list, action, prefix, start);
+                                                    dialogue.update(State::AvailabilityModify { msg_id, availability_entry, availability_list, action, prefix, start }).await?;
+                                                }
+                                            };
                                         } else if action == "DELETE" {
-                                            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool).await?;
+                                            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, msg_id).await?;
                                         } else {
                                             dialogue.update(State::ErrorState).await?;
                                         }
@@ -1013,12 +1028,13 @@ pub(super) async fn availability_select(
 pub(super) async fn availability_modify(
     bot: Bot,
     dialogue: MyDialogue,
-    (availability_entry, availability_list, action, prefix, start): (Availability, Vec<Availability>, String, String, usize),
+    (msg_id, availability_entry, availability_list, action, prefix, start): (MessageId, Availability, Vec<Availability>, String, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify", "Callback", q,
+        "MessageId" => msg_id,
         "Availability" => availability_entry,
         "Action" => action,
         "Prefix" => prefix,
@@ -1036,21 +1052,29 @@ pub(super) async fn availability_modify(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry).await;
         }
         Some(option) => {
             if option == "TYPE" {
-                display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
-                log::debug!("Transitioning to AvailabilityModifyType with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
-                dialogue.update(State::AvailabilityModifyType { availability_entry, action, start }).await?;
+                match display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => {
+                        log::debug!("Transitioning to AvailabilityModifyType with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
+                        dialogue.update(State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }).await?
+                    }
+                }
             } else if option == "REMARKS" {
-                display_edit_remarks(&bot, dialogue.chat_id(), &q.from.username).await;
-                log::debug!("Transitioning to AvailabilityModifyRemarks with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
-                dialogue.update(State::AvailabilityModifyRemarks { availability_entry, action, start }).await?;
+                match display_edit_remarks(&bot, dialogue.chat_id(), &q.from.username).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(change_msg_id) => {
+                        log::debug!("Transitioning to AvailabilityModifyRemarks with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
+                        dialogue.update(State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }).await?
+                    }
+                }
+                
             } else if option == "DELETE" {
-                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool).await?;
+                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, msg_id).await?;
             } else if option == "BACK" {
-                handle_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action).await?;
+                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, msg_id).await?;
             }
         }
     }
@@ -1061,12 +1085,14 @@ pub(super) async fn availability_modify(
 pub(super) async fn availability_modify_remarks(
     bot: Bot,
     dialogue: MyDialogue,
-    (availability_entry, action, start): (Availability, String, usize),
+    (msg_id, change_msg_id, availability_entry, action, start): (MessageId, MessageId, Availability, String, usize),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify_remarks", "Message", msg,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Availability" => availability_entry,
         "Action" => action,
         "Start" => start
@@ -1082,14 +1108,14 @@ pub(super) async fn availability_modify_remarks(
     
     match msg.text().map(ToOwned::to_owned) {
         Some(input_remarks) => {
-            modify_availability_and_go_back(&bot, &dialogue, &user.username, user.id.0, availability_entry, start, 8, action, None, Some(input_remarks), &pool).await?;
+            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+            modify_availability_and_go_back(&bot, &dialogue, &user.username, user.id.0, availability_entry, start, 8, action, None, Some(input_remarks), &pool, msg_id).await?;
         }
         None => {
             send_msg(
                 bot.send_message(dialogue.chat_id(), "Please, enter remarks, or type /cancel to abort."),
                 &user.username,
             ).await;
-            display_edit_remarks(&bot, dialogue.chat_id(), &user.username).await;
         }
     }
     
@@ -1099,12 +1125,14 @@ pub(super) async fn availability_modify_remarks(
 pub(super) async fn availability_modify_type(
     bot: Bot,
     dialogue: MyDialogue,
-    (availability_entry, action, start): (Availability, String, usize),
+    (msg_id, change_msg_id, availability_entry, action, start): (MessageId, MessageId, Availability, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify_type", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Availability" => availability_entry,
         "Action" => action,
         "Start" => start
@@ -1121,15 +1149,18 @@ pub(super) async fn availability_modify_type(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
         }
         Some(option) => {
             match Ict::from_str(&option) {
                 Ok(ict_type_enum) => {
                     if ict_type_enum == Ict::OTHER || ict_type_enum == Ict::LIVE {
-                        modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, Some(ict_type_enum), None, &pool).await?;
+                        log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                        modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, Some(ict_type_enum), None, &pool, msg_id).await?;
                     } else {
-                        display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), "Invalid option."),
+                            &q.from.username,
+                        ).await;
                     }
                 }
                 _ => {
@@ -1137,7 +1168,6 @@ pub(super) async fn availability_modify_type(
                         bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
                         &q.from.username,
                     ).await;
-                    display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await;
                 }
             }
         }

@@ -1,14 +1,11 @@
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::{controllers, log_endpoint_hit, notifier};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
-use teloxide::payloads::EditMessageText;
 use teloxide::prelude::*;
-use teloxide::RequestError;
-use teloxide::requests::JsonRequest;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
 
 async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
@@ -256,79 +253,33 @@ pub(super) async fn register_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_name_raw) => {
-            let cleaned_name = utils::cleanup_name(&input_name_raw);
-
-            // Validate that the name contains only allowed characters
-            if !utils::is_valid_name(&cleaned_name) {
-                // Invalid input: Notify the user and prompt to re-enter the name
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        "Invalid name. Please use only letters and spaces. Try again or type /cancel to abort.",
-                    ),
-                    &user.username,
-                ).await;
-                // Remain in the current state to allow the user to re-enter their name
-                return Ok(());
-            }
-
-            // Normalize the name (e.g., capitalize each word)
-            let normalized_name = cleaned_name
-                .split_whitespace()
-                .map(|word| {
-                    let mut chars = word.chars();
-                    match chars.next() {
-                        None => String::new(),
-                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                    }
-                })
-                .collect::<Vec<String>>()
-                .join(" ");
-
-            if normalized_name.len() > utils::MAX_NAME_LENGTH {
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        format!(
-                            "OPS NAME is too long. Please enter a name with no more than {} characters.",
-                            utils::MAX_NAME_LENGTH
-                        ),
-                    ),
-                    &user.username,
-                ).await;
-
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered OPS name exceeding max length: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    normalized_name
-                );
-
-                return Ok(());
-            }
-
-            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-
-            match display_register_ops_name(&bot, dialogue.chat_id(), &user.username).await {
-                None => {}
-                Some(new_msg_id) => {
-                    log::debug!(
-                        "Transitioning to RegisterOpsName with RoleType: {:?}, UsrType: {:?}, Name: {}",
-                        role_type,
-                        user_type,
-                        normalized_name
-                    );
-                    // Update the dialogue state to RegisterOpsName with the sanitized name
-                    dialogue
-                        .update(State::RegisterOpsName {
-                            msg_id: new_msg_id,
-                            role_type,
-                            user_type,
-                            name: normalized_name,
-                        })
-                        .await?
+            match validate_name(&bot, &dialogue, &user.username, input_name_raw, false).await {
+                Ok(name) => {
+                    log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
+                    match display_register_ops_name(&bot, dialogue.chat_id(), &user.username).await {
+                        None => {}
+                        Some(new_msg_id) => {
+                            log::debug!(
+                                "Transitioning to RegisterOpsName with RoleType: {:?}, UsrType: {:?}, Name: {}",
+                                role_type,
+                                user_type,
+                                name
+                            ); 
+                            // Update the dialogue state to RegisterOpsName with the sanitized name
+                            dialogue.update(State::RegisterOpsName {
+                                    msg_id: new_msg_id,
+                                    role_type,
+                                    user_type,
+                                    name,
+                                }).await?
+                        }
+                    };
                 }
-            };
+                Err(_) => {
+                    // Let the user retry
+                    return Ok(());
+                }
+            }
         }
         None => {
             // If no text is found in the message, prompt the user to send their full name
@@ -371,73 +322,11 @@ pub(super) async fn register_ops_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_ops_name_raw) => {
-            let cleaned_ops_name = utils::cleanup_name(&input_ops_name_raw).to_uppercase();
-
-            // Validate that the OPS name contains only allowed characters and is not empty
-            if !utils::is_valid_ops_name(&cleaned_ops_name) {
-                // Invalid input: Notify the user and prompt to re-enter OPS name
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        "Invalid OPS NAME. Please use only letters and spaces. Try again or type /cancel to abort.",
-                    ),
-                    &user.username,
-                ).await;
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered invalid OPS name: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    input_ops_name_raw
-                );
-                // Remain in the current state to allow the user to re-enter OPS name
-                return Ok(());
-            }
-
-            // Enforce a maximum length
-            if cleaned_ops_name.len() > utils::MAX_NAME_LENGTH {
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        format!(
-                            "OPS NAME is too long. Please enter a name with no more than {} characters.",
-                            utils::MAX_NAME_LENGTH
-                        ),
-                    ),
-                    &user.username,
-                ).await;
-
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered OPS name exceeding max length: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    cleaned_ops_name
-                );
-
-                return Ok(());
-            }
-
-            // Check for OPS name uniqueness
-            match controllers::user::user_exists_ops_name(&pool, &cleaned_ops_name).await {
-                Ok(true) => {
-                    // OPS name already exists: Notify the user and prompt to re-enter
-                    send_msg(
-                        bot.send_message( dialogue.chat_id(),
-                            "OPS NAME already exists. Please choose a different OPS NAME or type /cancel to abort.", ),
-                        &user.username,
-                    ).await;
-                    // Log the duplicate OPS name attempt
-                    log::debug!(
-                        "User {} attempted to use a duplicate OPS name: {}",
-                        user.username.as_deref().unwrap_or("Unknown"),
-                        cleaned_ops_name
-                    );
-                    // Remain in the current state to allow the user to re-enter OPS name
-                    return Ok(());
-                },
-                Ok(false) => {
+            match validate_ops_name(&bot, &dialogue, &user.username, input_ops_name_raw, &pool).await {
+                Ok(ops_name) => {
                     // OPS name is unique, proceed with registration
                     log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                    match display_register_confirmation(&bot, dialogue.chat_id(), &user.username, &name, &cleaned_ops_name, &role_type, &user_type).await {
+                    match display_register_confirmation(&bot, dialogue.chat_id(), &user.username, &name, &ops_name, &role_type, &user_type).await {
                         None => {}
                         Some(new_msg_id) => {
                             dialogue.update(State::RegisterComplete {
@@ -445,12 +334,15 @@ pub(super) async fn register_ops_name(
                                 role_type,
                                 user_type,
                                 name,
-                                ops_name: cleaned_ops_name
+                                ops_name: ops_name
                             }).await?;
                         }
                     };
-                },
-                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
+                }
+                Err(_) => {
+                    // Let the user retry, or will auto transition to error state if database error occured
+                    return Ok(());
+                }
             }
         }
         None => {

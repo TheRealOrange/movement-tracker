@@ -175,42 +175,6 @@ pub(crate) async fn apply_exists_tele_id(conn: &PgPool, tele_id: u64) -> Result<
     }
 }
 
-
-pub(crate) async fn get_apply_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<Apply, sqlx::Error> {
-    let result = sqlx::query_as!(
-        Apply,
-        r#"
-        SELECT
-            id,
-            tele_id,
-            chat_username,
-            name,
-            ops_name,
-            usr_type AS "usr_type: _",
-            role_type AS "role_type: _",
-            created,
-            updated
-        FROM apply
-        WHERE tele_id = $1
-        AND is_valid = TRUE;  -- Only fetch valid apply requests
-        "#,
-        tele_id as i64
-    )
-        .fetch_one(conn)
-        .await;
-
-    match result {
-        Ok(apply) => {
-            log::info!("Successfully retrieved valid apply request with tele_id: {}", tele_id);
-            Ok(apply)
-        }
-        Err(e) => {
-            log::error!("Error fetching valid apply request by tele_id: {}: {}", tele_id, e);
-            Err(e)
-        }
-    }
-}
-
 pub(crate) async fn user_has_pending_application(conn: &PgPool, tele_id: u64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"

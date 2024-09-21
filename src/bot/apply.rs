@@ -1,7 +1,7 @@
 use crate::bot::state::State;
-use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::types::{Apply, RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit, utils};
+use crate::{controllers, log_endpoint_hit};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::types::Uuid;
@@ -11,7 +11,6 @@ use std::str::FromStr;
 use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::RequestError;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
 
 // Generates the inline keyboard for applications with pagination
@@ -158,6 +157,19 @@ async fn handle_re_show_options(
     Ok(())
 }
 
+fn get_application_edit_text(application: &Apply, admin: bool) -> String {
+    format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
+            application.name,
+            application.ops_name,
+            application.role_type.as_ref(),
+            application.usr_type.as_ref(),
+            application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
+            application.chat_username,
+            if admin == true { "YES" } else { "NO" },
+            Local::now().format("%d%m %H%M.%S").to_string()
+    )
+}
+
 async fn display_application_edit_prompt(
     bot: &Bot,
     chat_id: ChatId,
@@ -170,7 +182,7 @@ async fn display_application_edit_prompt(
         .into_iter()
         .map(|option| vec![InlineKeyboardButton::callback(option, option)])
         .collect();
-    let confirm = ["DONE", "CANCEL"]
+    let confirm = ["REJECT", "DONE", "CANCEL"]
         .into_iter()
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
@@ -182,16 +194,7 @@ async fn display_application_edit_prompt(
         send_msg(
             bot.send_message(
                 chat_id,
-                format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
-                        &application.name,
-                        &application.ops_name,
-                        application.role_type.as_ref(),
-                        application.usr_type.as_ref(),
-                        &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-                        &application.chat_username,
-                        if admin == true { "YES" } else { "NO" },
-                        Local::now().format("%d%m %H%M.%S").to_string()
-                )
+                get_application_edit_text(&application, admin)
             ).reply_markup(InlineKeyboardMarkup::new(cloned_keyboard)),
             username
         ).await
@@ -204,16 +207,7 @@ async fn display_application_edit_prompt(
         Some(msg_id) => {
             match bot.edit_message_text(
                 chat_id, msg_id,
-                format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
-                        &application.name,
-                        &application.ops_name,
-                        application.role_type.as_ref(),
-                        application.usr_type.as_ref(),
-                        &application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-                        &application.chat_username,
-                        if admin == true { "YES" } else { "NO" },
-                        Local::now().format("%d%m %H%M.%S").to_string()
-                )
+                get_application_edit_text(&application, admin)
             ).reply_markup(InlineKeyboardMarkup::new(options)).await {
                 Ok(edited_msg) => Some(edited_msg.id),
                 Err(_) => send_new_msg().await
@@ -524,6 +518,20 @@ pub(super) async fn apply_edit_prompt(
                     .await;
                 dialogue.update(State::Start).await?
             }
+            "REJECT" => {
+                // Operation cancelled
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                match controllers::apply::remove_apply_by_uuid(&pool, application.id).await {
+                    Ok(success) => {
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), if success { "Application rejected." } else { "Error occured" }),
+                            &q.from.username,
+                        ).await;
+                        dialogue.update(State::Start).await?
+                    }
+                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+                }
+            }
             "NAME" => {
                 // Edit name
                 match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
@@ -597,59 +605,23 @@ pub(super) async fn apply_edit_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_name_raw) => {
-            let cleaned_name = utils::cleanup_name(&input_name_raw);
-
-            // Validate that the name contains only alphabetical characters and spaces
-            if !utils::is_valid_name(&cleaned_name) {
-                // Invalid input: Notify the user and prompt to re-enter the name
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        "Invalid name. Please use only letters and spaces. Try again or type /cancel to abort.",
-                    ),
-                    &user.username,
-                )
-                    .await;
-                display_edit_name(&bot, dialogue.chat_id(), &user.username).await;
-
-                log::debug!(
-                    "User {} entered invalid name: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    input_name_raw
-                );
-
-                // Remain in the current state to allow the user to re-enter their name
-                return Ok(());
-            }
-
-            if cleaned_name.len() > utils::MAX_NAME_LENGTH {
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        format!(
-                            "Name is too long. Please enter a name with no more than {} characters.",
-                            utils::MAX_NAME_LENGTH
-                        ),
-                    ),
-                    &user.username,
-                ).await;
-                display_edit_name(&bot, dialogue.chat_id(), &user.username).await;
-
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered name exceeding max length: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    cleaned_name
-                );
-
-                return Ok(());
-            }
-
-            application.name = cleaned_name.to_string();
-            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-            match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, Some(msg_id)).await {
-                None => dialogue.update(State::ErrorState).await?,
-                Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+            match validate_name(&bot, &dialogue, &user.username, input_name_raw, false).await {
+                Ok(name) => {
+                    application.name = name.clone();
+                    send_msg(
+                        bot.send_message(dialogue.chat_id(), format!("Name updated to: {}", name)),
+                        &user.username,
+                    ).await;
+                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                    match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, Some(msg_id)).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
+                    }
+                }
+                Err(_) => {
+                    // Let the user retry
+                    return Ok(());
+                }
             }
         }
         None => {
@@ -691,88 +663,19 @@ pub(super) async fn apply_edit_ops_name(
 
     match msg.text().map(ToOwned::to_owned) {
         Some(input_ops_name_raw) => {
-            let cleaned_ops_name = utils::cleanup_name(&input_ops_name_raw).to_uppercase();
-
-            // Validate that the OPS name contains only allowed characters and is not empty
-            if !utils::is_valid_ops_name(&cleaned_ops_name) {
-                // Invalid input: Notify the user and prompt to re-enter OPS name
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        "Invalid OPS NAME. Please use only letters and spaces. Try again or type /cancel to abort.",
-                    ),
-                    &user.username,
-                )
-                    .await;
-                display_edit_ops_name(&bot, dialogue.chat_id(), &user.username).await;
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered invalid OPS name: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    input_ops_name_raw
-                );
-                // Remain in the current state to allow the user to re-enter OPS name
-                return Ok(());
-            }
-
-            // Enforce a maximum length
-            if cleaned_ops_name.len() > utils::MAX_NAME_LENGTH {
-                send_msg(
-                    bot.send_message(
-                        dialogue.chat_id(),
-                        format!(
-                            "OPS NAME is too long. Please enter a name with no more than {} characters.",
-                            utils::MAX_NAME_LENGTH
-                        ),
-                    ),
-                    &user.username,
-                )
-                    .await;
-                display_edit_ops_name(&bot, dialogue.chat_id(), &user.username).await;
-
-                // Log the invalid attempt
-                log::debug!(
-                    "User {} entered OPS name exceeding max length: {}",
-                    user.username.as_deref().unwrap_or("Unknown"),
-                    cleaned_ops_name
-                );
-
-                return Ok(());
-            }
-
-            // Check for OPS name uniqueness
-            match controllers::user::user_exists_ops_name(&pool, &cleaned_ops_name).await {
-                Ok(true) => {
-                    // OPS name already exists: Notify the user and prompt to re-enter
-                    send_msg(
-                        bot.send_message(
-                            dialogue.chat_id(),
-                            "OPS NAME already exists. Please choose a different OPS NAME or type /cancel to abort.",
-                        ),
-                        &user.username,
-                    )
-                        .await;
-                    display_edit_ops_name(&bot, dialogue.chat_id(), &user.username).await;
-                    log::debug!(
-                        "User {} attempted to use a duplicate OPS name: {}",
-                        user.username.as_deref().unwrap_or("Unknown"),
-                        cleaned_ops_name
-                    );
-                    // Remain in the current state to allow the user to re-enter OPS name
-                    return Ok(());
-                },
-                Ok(false) => {
-                    application.ops_name = cleaned_ops_name.clone();
+            match validate_ops_name(&bot, &dialogue, &user.username, input_ops_name_raw, &pool).await {
+                Ok(ops_name) => {
+                    // OPS name is unique, proceed with registration
+                    application.ops_name = ops_name.clone();
                     log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
                     match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, Some(msg_id)).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, application, admin }).await?
                     }
-                },
-                Err(e) => {
-                    // Handle unexpected database errors
-                    log::error!("Database error during user_exists_ops_name: {}", e);
-                    handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await;
+                }
+                Err(_) => {
+                    // Let the user retry, or will auto transition to error state if database error occured
+                    return Ok(());
                 }
             }
         }

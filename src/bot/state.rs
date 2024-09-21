@@ -1,4 +1,4 @@
-use super::commands::{cancel, help, Commands, PrivilegedCommands};
+use super::commands::{cancel, help, set_menu_buttons, Commands, PrivilegedCommands};
 use super::{send_msg, HandlerResult, MyDialogue};
 use crate::bot::apply::{apply_edit_admin, apply_edit_name, apply_edit_ops_name, apply_edit_prompt, apply_edit_role, apply_edit_type, apply_view, approve};
 use chrono::NaiveDate;
@@ -111,6 +111,7 @@ pub(super) enum State {
         start: usize
     },
     AvailabilityModify {
+        msg_id: MessageId,
         availability_entry: Availability,
         availability_list: Vec<Availability>,
         action: String,
@@ -118,11 +119,15 @@ pub(super) enum State {
         start: usize
     },
     AvailabilityModifyType {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         availability_entry: Availability,
         action: String,
         start: usize
     },
     AvailabilityModifyRemarks {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         availability_entry: Availability,
         action: String,
         start: usize
@@ -137,6 +142,7 @@ pub(super) enum State {
         avail_type: Ict
     },
     AvailabilityAddRemarks {
+        msg_id: MessageId,
         avail_type: Ict,
         avail_dates: Vec<NaiveDate>
     },
@@ -161,21 +167,32 @@ pub(super) enum State {
     // TODO: States meant for SANS attendance confirmation
     // States meant for editing users
     UserEdit {
+        msg_id: MessageId,
         user_details: Usr
     },
     UserEditName {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         user_details: Usr
     },
     UserEditOpsName {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         user_details: Usr
     },
     UserEditType {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         user_details: Usr
     },
     UserEditAdmin {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         user_details: Usr
     },
     UserEditDeleteConfirm {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
         user_details: Usr
     },
     // States meant for tracking saf100 issued
@@ -209,6 +226,7 @@ pub(super) enum State {
 
 pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync + 'static>> {
     let command_handler = teloxide::filter_command::<Commands, _>()
+        .branch(case![Commands::Start].endpoint(help))
         .branch(case![Commands::Help].endpoint(help))
         .branch(case![Commands::Register].branch(dptree::filter_async(check_private).endpoint(register)))
         .branch(dptree::filter_async(check_registered)
@@ -235,13 +253,13 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
                 .branch(admin_command_handler)
                 .branch(case![State::ApplyEditName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_name))
                 .branch(case![State::ApplyEditOpsName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_ops_name))
-                .branch(case![State::UserEditName { user_details }].endpoint(user_edit_name))
-                .branch(case![State::UserEditOpsName { user_details }].endpoint(user_edit_ops_name))
+                .branch(case![State::UserEditName { msg_id, change_msg_id, user_details }].endpoint(user_edit_name))
+                .branch(case![State::UserEditOpsName { msg_id, change_msg_id, user_details }].endpoint(user_edit_ops_name))
             )
             .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
-            .branch(case![State::AvailabilityModifyRemarks { availability_entry, action, start }].endpoint(availability_modify_remarks))
+            .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
             .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))
-            .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_remarks))
+            .branch(case![State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
         );
     
 
@@ -256,10 +274,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::ApplyEditRole { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_role))
             .branch(case![State::ApplyEditType { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_type))
             .branch(case![State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_admin))
-            .branch(case![State::UserEdit { user_details }].endpoint(user_edit_prompt))
-            .branch(case![State::UserEditType { user_details }].endpoint(user_edit_type))
-            .branch(case![State::UserEditAdmin { user_details }].endpoint(user_edit_admin))
-            .branch(case![State::UserEditDeleteConfirm { user_details }].endpoint(user_edit_delete))
+            .branch(case![State::UserEdit { msg_id, user_details }].endpoint(user_edit_prompt))
+            .branch(case![State::UserEditType { msg_id, change_msg_id, user_details }].endpoint(user_edit_type))
+            .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details }].endpoint(user_edit_admin))
+            .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
             .branch(case![State::Saf100Select { msg_id }].endpoint(saf100_select))
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
@@ -267,29 +285,17 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         )
         .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
-        .branch(case![State::AvailabilityModify { availability_entry, availability_list, action, prefix, start }].endpoint(availability_modify))
-        .branch(case![State::AvailabilityModifyType { availability_entry, action, start }].endpoint(availability_modify_type))
+        .branch(case![State::AvailabilityModify { msg_id, availability_entry, availability_list, action, prefix, start }].endpoint(availability_modify))
+        .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_callback))
         .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
-        .branch(case![State::AvailabilityAddRemarks { avail_type, avail_dates }].endpoint(availability_add_complete))
+        .branch(case![State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
         .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
         .branch(callback_query_handler)
         .branch(endpoint(invalid_state))
-}
-
-// Function to handle "server is overloaded" message if connection acquisition fails
-async fn reply_server_overloaded(bot: &Bot, msg: &Message) {
-    send_msg(
-        bot.send_message(msg.chat.id, "Server is overloaded. Please try again later.")
-            .reply_parameters(ReplyParameters::new(msg.id)),
-        match msg.from {
-            Some(ref from) => &(from.username),
-            _ => &None
-        }
-    ).await;
 }
 
 async fn check_private(bot: Bot, msg: Message) -> bool {
@@ -310,7 +316,6 @@ async fn check_private(bot: Bot, msg: Message) -> bool {
             ).await;
             false
         }, // Group, Supergroup, or Channel
-        _ => false, // Fallback for any other chat types
     }
 }
 
@@ -359,7 +364,7 @@ async fn check_registered(bot: Bot, msg: Message, pool: PgPool) -> bool {
     }
 }
 
-async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
+async fn check_admin(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgPool) -> bool {
     // Early return if the message has no sender (msg.from() is None)
     let user = if let Some(user) = msg.from {
         user
@@ -383,6 +388,10 @@ async fn check_admin(bot: Bot, msg: Message, pool: PgPool) -> bool {
             // Check if the user is an admin
             match controllers::user::get_user_by_tele_id(&pool, user.id.0).await {
                 Ok(retrieved_usr) => {
+                    // Set menu buttons based on the user's admin status
+                    // Determine the kind of chat the message was sent in
+                    let is_public_chat = matches!(&msg.chat.kind, ChatKind::Public(_));
+                    set_menu_buttons(bot, dialogue.chat_id(), user.id, retrieved_usr.admin, is_public_chat).await;
                     retrieved_usr.admin
                 }
                 Err(_) => handle_error().await,

@@ -4,30 +4,42 @@ use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::types::{AvailabilityDetails, RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, utils};
-use chrono::{Duration, Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 
-async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Option<String>, role_type: &RoleType, availability_list: &Vec<AvailabilityDetails>, start: NaiveDate, end: NaiveDate, edit_msg: Option<MessageId>) -> Option<MessageId> {
+async fn display_availability_forecast(
+    bot: &Bot,
+    chat_id: ChatId,
+    username: &Option<String>,
+    role_type: &RoleType,
+    availability_list: &Vec<AvailabilityDetails>,
+    start: NaiveDate,
+    end: NaiveDate,
+    edit_msg: Option<MessageId>
+) -> Option<MessageId> {
     let change_view_roles: Vec<InlineKeyboardButton> = RoleType::iter()
-        .filter_map(|role| if *role_type != role { Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref())) } else { None })
+        .filter_map(|role| { if *role_type != role {
+                Some(InlineKeyboardButton::callback("VIEW ".to_owned() + role.as_ref(), role.as_ref(), ))
+            } else { None }
+        })
         .collect();
 
     let mut view_range: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     view_range.push(
         ["NEXT WEEK", "1 MONTH"]
-        .into_iter()
-        .map(|option| InlineKeyboardButton::callback(option, option))
-        .collect()
+            .into_iter()
+            .map(|option| InlineKeyboardButton::callback(option, option))
+            .collect(),
     );
     view_range.push(
         ["2 MONTHS", "VIEW ALL"]
             .into_iter()
             .map(|option| InlineKeyboardButton::callback(option, option))
-            .collect()
+            .collect(),
     );
 
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
@@ -38,65 +50,102 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
     // Header for role type and period with formatted dates
     let mut output_text = format!(
         "*{} for role:* __{}__ *from* __{}__ *to* __{}__\n\n",
-        if availability_list.is_empty() { "No availability entries" } else { "Availability forecast" },
+        if availability_list.is_empty() {
+            "No availability entries"
+        } else {
+            "Availability forecast"
+        },
         role_type.as_ref(),
         start.format("%b\\-%d\\-%Y"),
         end.format("%b\\-%d\\-%Y")
     );
 
-    // Organize availability by day
-    let mut availability_by_date: std::collections::BTreeMap<NaiveDate, Vec<&AvailabilityDetails>> = std::collections::BTreeMap::new();
+    // Group availability by year and month
+    let mut availability_by_year_month: std::collections::BTreeMap<(i32, u32), Vec<&AvailabilityDetails>> = std::collections::BTreeMap::new();
     for availability in availability_list {
-        availability_by_date
-            .entry(availability.avail)
+        let year = availability.avail.year();
+        let month = availability.avail.month();
+        availability_by_year_month
+            .entry((year, month))
             .or_insert(Vec::new())
             .push(availability);
     }
 
-    // Format the availability information for each date
-    for (date, availabilities) in availability_by_date {
-        output_text.push_str(&format!("__{}__\n", date.format("%b %d"))); // Format as "Sep 05"
+    // Format the availability information grouped by year and month
+    for ((year, month), availabilities) in availability_by_year_month {
+        output_text.push_str(&format!("**{} {}**\n", NaiveDate::from_ymd_opt(year, month, 1)?.format("%B"), year)); // Display month and year
 
+        let mut availability_by_date: std::collections::BTreeMap<NaiveDate, Vec<&AvailabilityDetails>> = std::collections::BTreeMap::new();
         for availability in availabilities {
-            let planned_str = if availability.planned { " \\(PLANNED\\)" } else { "" };
-            let avail = if !availability.is_valid { " *\\(UNAVAIL\\)*" } else { "" };
-            let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
-            let saf100_str = if availability.saf100 { " SAF100 ISSUED" } else { if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" } else { "" } };
-
-            // Truncate remarks to a max of 15 characters
-            let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.len() > 15 {
-                    format!("{}: {}\\.\\.\\.", saf100_str, utils::escape_special_characters(&remarks[0..15]))
-                } else {
-                    format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
-                }
-            } else {
-                saf100_str.to_string()
-            };
-
-            output_text.push_str(&format!(
-                "\\- {} __{}__{}{}{}{}\n",
-                availability.ops_name,
-                availability.ict_type.as_ref(),
-                planned_str,
-                avail,
-                usrtype_str,
-                remarks_str
-            ));
+            availability_by_date
+                .entry(availability.avail)
+                .or_insert(Vec::new())
+                .push(availability);
         }
-        output_text.push('\n'); // Add space between dates
+
+        // Format availability for each day in the month
+        for (date, availabilities_for_day) in availability_by_date {
+            output_text.push_str(&format!("__{}__\n", date.format("%b %d"))); // Format as "Sep 05"
+
+            for availability in availabilities_for_day {
+                let planned_str = if availability.planned { " \\(PLANNED\\)" } else { "" };
+                let avail = if !availability.is_valid { " *\\(UNAVAIL\\)*" } else { "" };
+                let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
+                let saf100_str = if availability.saf100 {
+                    " SAF100 ISSUED"
+                } else if availability.planned && availability.usr_type == UsrType::NS {
+                    " *PENDING SAF100*"
+                } else {
+                    ""
+                };
+
+                // Truncate remarks to a max of 15 characters
+                let remarks_str = if let Some(remarks) = &availability.remarks {
+                    if remarks.len() > 15 {
+                        format!(
+                            "{}: {}\\.\\.\\.",
+                            saf100_str,
+                            utils::escape_special_characters(&remarks[0..15])
+                        )
+                    } else {
+                        format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
+                    }
+                } else {
+                    saf100_str.to_string()
+                };
+
+                output_text.push_str(&format!(
+                    "\\- {} __{}__{}{}{}{}\n",
+                    availability.ops_name,
+                    availability.ict_type.as_ref(),
+                    planned_str,
+                    avail,
+                    usrtype_str,
+                    remarks_str
+                ));
+            }
+            output_text.push('\n'); // Add space between dates
+        }
+        output_text.push('\n'); // Add space between months
     }
-    
-    output_text.push_str(format!("\nUpdated: {}", Local::now().format("%d%m %H%M\\.%S").to_string()).as_ref());
+
+    output_text.push_str(
+        format!(
+            "\nUpdated: {}",
+            Local::now().format("%d%m %H%M\\.%S").to_string()
+        ).as_ref(),
+    );
 
     // Send or edit the message
     match edit_msg {
         Some(id) => {
             // Edit the existing message
-            match bot.edit_message_text(chat_id, id, output_text.clone())
+            match bot
+                .edit_message_text(chat_id, id, output_text.clone())
                 .parse_mode(ParseMode::MarkdownV2)
                 .reply_markup(InlineKeyboardMarkup::new(options.clone()))
-                .await {
+                .await
+            {
                 Ok(edit_msg) => Some(edit_msg.id),
                 Err(e) => {
                     log::error!("Failed to update existing message ({}): {}", id.0, e);
@@ -104,8 +153,9 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
                         bot.send_message(chat_id, output_text)
                             .parse_mode(ParseMode::MarkdownV2)
                             .reply_markup(InlineKeyboardMarkup::new(options)),
-                        username
-                    ).await
+                        username,
+                    )
+                        .await
                 }
             }
         }
@@ -114,8 +164,9 @@ async fn display_availability_forecast(bot: &Bot, chat_id: ChatId, username: &Op
                 bot.send_message(chat_id, output_text)
                     .parse_mode(ParseMode::MarkdownV2)
                     .reply_markup(InlineKeyboardMarkup::new(options)),
-                username
-            ).await
+                username,
+            )
+                .await
         }
     }
 }

@@ -1,46 +1,73 @@
+use std::collections::HashMap;
 use crate::types::{Availability, AvailabilityDetails, Ict, RoleType};
 use chrono::Local;
 use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
 use sqlx::PgPool;
 
-async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
+pub(crate) async fn check_user_avail_multiple(
+    conn: &PgPool,
+    tele_id: u64,
+    dates: Vec<NaiveDate>
+) -> Result<Vec<Option<Availability>>, sqlx::Error> {
+    if dates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Fetch all availability records for the user that match any of the input dates
+    let result = sqlx::query_as!(
+        Availability,
         r#"
-        SELECT EXISTS(
-            SELECT 1 FROM availability
-            INNER JOIN usrs
-            ON availability.usr_id = usrs.id
-            WHERE usrs.tele_id = $1
-            AND availability.avail = $2
-            AND (availability.is_valid = TRUE OR availability.planned = TRUE)
-        );
+        SELECT
+            a.id,
+            a.usr_id as user_id,
+            a.avail,
+            a.ict_type AS "ict_type: _",
+            a.remarks,
+            a.planned,
+            a.saf100,
+            a.attended,
+            a.is_valid,
+            a.created,
+            a.updated
+        FROM availability a
+        INNER JOIN usrs u ON a.usr_id = u.id
+        WHERE u.tele_id = $1
+          AND a.avail = ANY($2)
+          AND a.is_valid = TRUE
         "#,
-        tele_id,
-        date
+        tele_id  as i64,
+        &dates[..] // Pass the dates as a slice
     )
-        .fetch_one(conn)
+        .fetch_all(conn)
         .await;
 
     match result {
-        Ok(res) => {
-            let exists: bool = res.exists.unwrap_or(false);
+        Ok(records) => {
+            // Map the fetched records by date for quick lookup
+            let availability_map: HashMap<NaiveDate, Availability> = records.into_iter()
+                .map(|record| (record.avail, record))
+                .collect();
 
-            if exists {
-                log::info!(
-                    "User with telegram id: ({}) is available on: ({})",
-                    tele_id,
-                    date
-                );
-            } else {
-                log::info!(
-                    "User with telegram id: ({}) is not available on: ({})",
-                    tele_id,
-                    date
-                );
-            }
+            // Build the result vector maintaining the order of input dates
+            let result: Vec<Option<Availability>> = dates.into_iter()
+                .map(|date| availability_map.get(&date).cloned())
+                .collect();
 
-            Ok(exists)
+            // Extract available dates from the availability_map
+            let available_dates: Vec<NaiveDate> = availability_map.keys().cloned().collect();
+            let available_dates_str: Vec<String> = available_dates
+                .iter()
+                .map(|date| date.format("%m/%d/%Y").to_string())
+                .collect();
+
+            log::info!(
+                "User with Telegram ID ({}) has existing availability on: {}",
+                tele_id,
+                available_dates_str.join(", ")
+            );
+
+            Ok(result)
         }
         Err(e) => {
             log::error!("Error querying user availability: {}", e);
@@ -48,6 +75,7 @@ async fn check_user_avail(conn: &PgPool, tele_id: i64, date: NaiveDate) -> Resul
         }
     }
 }
+
 pub(crate) async fn edit_avail_by_uuid(
     conn: &PgPool,
     availability_id: Uuid,

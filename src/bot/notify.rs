@@ -4,7 +4,6 @@ use rand::Rng;
 use sqlx::PgPool;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
-use teloxide::RequestError;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use crate::bot::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::{controllers, log_endpoint_hit};

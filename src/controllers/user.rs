@@ -295,3 +295,28 @@ pub(crate) async fn update_user(
         }
     }
 }
+
+// Helper function to get and display all valid OPS names
+pub(crate) async fn get_all_ops_names(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    // Fetch all OPS names from the database
+    let result = sqlx::query!(
+        r#"
+        SELECT ops_name
+        FROM usrs
+        WHERE is_valid = TRUE;
+        "#
+    )
+        .fetch_all(pool)
+        .await;
+
+    match result {
+        Ok(ops_names) => {
+            // Format the list of OPS names
+            Ok(ops_names.iter().map(|record| record.ops_name.clone()).collect())
+        }
+        Err(e) => {
+            log::error!("Error fetching OPS names: {}", e);
+            Err(e)
+        }
+    }
+}
