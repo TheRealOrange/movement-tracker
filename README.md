@@ -15,7 +15,7 @@ Ensure you have the following installed:
 The docker image is available at
 
 ```
-ghcr.io/therealorange/movement-tracker:latest
+ghcr.io/therealorange/movement-tracker:release
 ```
 Specify the prerequisite environment variables in order to use this application (you must have a PostgreSQL database up!). 
 Refer to the `docker-compose.yml` file for an example of how one may run the application with a database in a Compose stack. 
