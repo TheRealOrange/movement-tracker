@@ -84,7 +84,7 @@ pub(crate) async fn add_default_user_from_env(conn: &PgPool) -> Result<(), sqlx:
             } else {
                 log::info!("User with Telegram ID {} does not exist. Adding default user.", tele_id);
                 // Add the user with default details
-                controllers::user::add_user(
+                match controllers::user::add_user(
                     conn,
                     tele_id,
                     name,
@@ -92,7 +92,30 @@ pub(crate) async fn add_default_user_from_env(conn: &PgPool) -> Result<(), sqlx:
                     role_type,
                     usr_type,
                     admin,
-                ).await?;
+                ).await {
+                    Ok(user) => {
+                        // Set default notification settings
+                        match controllers::notifications::update_notification_settings(
+                            &conn,
+                            user.tele_id, // Assuming chat_id == tele_id
+                            Some(true),  // notif_system
+                            Some(true),  // notif_register
+                            None,        // notif_availability
+                            Some(true),  // notif_plan
+                            Some(true),  // notif_conflict
+                        ).await {
+                            Ok(_) => {
+                                log::info!("Default notification settings configured for default user {}", user.ops_name);
+                            }
+                            Err(_) => {
+                                log::error!("Failed to configure default notification settings for default user {}", user.ops_name);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        log::error!("Failed to add default user")
+                    }
+                };
             }
             Ok(())
         }
