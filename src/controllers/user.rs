@@ -104,6 +104,40 @@ pub(crate) async fn get_user_by_tele_id(conn: &PgPool, tele_id: u64) -> Result<U
     }
 }
 
+pub(crate) async fn get_user_by_uuid(conn: &PgPool, id: Uuid) -> Result<Usr, sqlx::Error> {
+    let result = sqlx::query_as!(
+        Usr,
+        r#"
+        SELECT
+            usrs.id AS id,
+            usrs.tele_id AS tele_id,
+            usrs.name AS name,
+            usrs.ops_name AS ops_name,
+            usrs.usr_type AS "usr_type: _",
+            usrs.role_type AS "role_type: _",
+            usrs.admin AS admin,
+            usrs.created AS created,
+            usrs.updated AS updated
+        FROM usrs
+        WHERE usrs.id = $1 AND usrs.is_valid = TRUE;
+        "#,
+        id
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            log::info!("Retrieved user by UUID: {}", id);
+            Ok(res)
+        }
+        Err(e) => {
+            log::error!("Error retrieving user by UUID {}: {}", id, e);
+            Err(e)
+        }
+    }
+}
+
 pub(crate) async fn get_user_by_ops_name(conn: &PgPool, ops_name: &str) -> Result<Usr, sqlx::Error> {
     let result = sqlx::query_as!(
         Usr,
@@ -336,6 +370,41 @@ pub(crate) async fn get_all_ops_names(pool: &PgPool) -> Result<Vec<String>, sqlx
         }
         Err(e) => {
             log::error!("Error fetching OPS names: {}", e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn is_last_admin(conn: &PgPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    // SQL query to determine if the user is the last admin
+    let result = sqlx::query!(
+        r#"
+        WITH user_admin AS (
+            SELECT admin
+            FROM usrs
+            WHERE id = $1 AND is_valid = TRUE
+        ), other_admins AS (
+            SELECT COUNT(*) AS count
+            FROM usrs
+            WHERE admin = TRUE AND is_valid = TRUE AND id != $1
+        )
+        SELECT
+            (user_admin.admin = TRUE) AND (other_admins.count = 0) AS is_last_admin
+        FROM user_admin, other_admins;
+        "#,
+        user_id
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(res) => {
+            // Format the list of OPS names
+            log::info!("Check if user with id: {} is the last admin: {}", user_id, res.is_last_admin.unwrap_or(false));
+            Ok(res.is_last_admin.unwrap_or(false))
+        }
+        Err(e) => {
+            log::error!("Error checking if user {} is last admin: {}", user_id, e);
             Err(e)
         }
     }

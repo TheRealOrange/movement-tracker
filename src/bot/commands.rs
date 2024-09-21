@@ -56,7 +56,7 @@ pub(super) enum PrivilegedCommands {
 pub(super) async fn set_menu_buttons(bot: Bot, chat_id: ChatId, user_id: UserId, is_admin: bool, is_public: bool) {
     let mut commands: Vec<BotCommand> = Commands::bot_commands().to_vec();
     
-    log::info!("Setting menu buttons for chat ({}): admin: {}, public: {}", chat_id.0, is_admin, is_public);
+    log::debug!("Setting menu buttons for chat ({}): admin: {}, public: {}", chat_id.0, is_admin, is_public);
     // If the user is an admin, and not in a public chat, append privileged commands
     if is_admin && !is_public {
         let mut privileged_commands = PrivilegedCommands::bot_commands().to_vec();
@@ -65,6 +65,15 @@ pub(super) async fn set_menu_buttons(bot: Bot, chat_id: ChatId, user_id: UserId,
     
     if is_public {
         // Set the combined commands for the chat
+        if is_admin {
+            // Extract the `Notify` command from PrivilegedCommands
+            if let Some(notify_cmd) = PrivilegedCommands::bot_commands().iter()
+                .find(|cmd| cmd.command == "/notify").cloned() {
+                commands.push(notify_cmd);
+            } else {
+                log::error!("Notify command not found in PrivilegedCommands");
+            }
+        }
         match bot.set_my_commands(commands).scope(BotCommandScope::ChatMember { chat_id: Recipient::Id(chat_id), user_id }).await {
             Ok(_) => {}
             Err(err) => {

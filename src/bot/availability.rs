@@ -98,16 +98,17 @@ fn get_availability_edit_text(
 
 async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) -> Option<MessageId> {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-    options.push(vec![InlineKeyboardButton::callback("ADD", "ADD")]);
-    
-    let control_options: Vec<InlineKeyboardButton> = ["ADD", "MODIFY", "DELETE"]
+
+    let mut control_row: Vec<InlineKeyboardButton> = vec![InlineKeyboardButton::callback("ADD", "ADD")];
+    let control_options: Vec<InlineKeyboardButton> = ["MODIFY", "DELETE"]
         .into_iter()
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
     
     if existing.len() > 0 {
-        options.push(control_options);
+        control_row.extend(control_options);
     }
+    options.push(control_row);
     options.push(vec![InlineKeyboardButton::callback("DONE", "DONE")]);
 
     let mut output_text = String::new();
@@ -930,7 +931,8 @@ pub(super) async fn availability_add_complete(
         }
         Some(option) => {
             if option == "DONE" {
-                // add availability to database with the specified remarks
+                // add availability to database no remarks
+                log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
                 register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool, msg_id).await;
                 
                 dialogue.update(State::Start).await?
