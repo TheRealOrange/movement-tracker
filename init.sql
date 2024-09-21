@@ -175,4 +175,51 @@ CREATE TRIGGER notification_settings_update
     EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
+
+-- Trigger function to disable the notifications if a user is configured to admin=FALSE
+CREATE OR REPLACE FUNCTION disable_notifications_on_admin_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.admin = TRUE AND NEW.admin = FALSE THEN
+        UPDATE notification_settings
+        SET is_valid = FALSE
+        WHERE chat_id = OLD.tele_id AND is_valid = TRUE;
+
+        RAISE NOTICE 'Disabled notifications for chat_id: % due to admin demotion.', OLD.tele_id;
+    END IF;
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Run trigger whenever the admin column of user data is edited
+CREATE TRIGGER trigger_disable_notifications
+    AFTER UPDATE OF admin ON usrs
+    FOR EACH ROW
+    WHEN (OLD.admin IS DISTINCT FROM NEW.admin)
+EXECUTE PROCEDURE disable_notifications_on_admin_change();
+
+-- Trigger function to disable the notifications if a user removed
+CREATE OR REPLACE FUNCTION disable_notifications_on_is_valid_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Check if is_valid changed from TRUE to FALSE
+    IF OLD.is_valid = TRUE AND NEW.is_valid = FALSE THEN
+        UPDATE notification_settings
+        SET is_valid = FALSE
+        WHERE chat_id = OLD.tele_id AND is_valid = TRUE;
+
+        RAISE NOTICE 'Disabled notifications for chat_id: % due to user invalidation.', OLD.tele_id;
+    END IF;
+RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Run trigger whenever the is_valid column of user data is edited
+CREATE TRIGGER trigger_disable_notifications_on_is_valid_change
+    AFTER UPDATE OF is_valid ON usrs
+    FOR EACH ROW
+    WHEN (OLD.is_valid IS DISTINCT FROM NEW.is_valid)
+EXECUTE PROCEDURE disable_notifications_on_is_valid_change();
+
+
 COMMIT;
