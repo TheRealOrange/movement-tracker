@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            tele_id,\n            chat_username,\n            name,\n            ops_name,\n            usr_type AS \"usr_type: _\",\n            role_type AS \"role_type: _\",\n            created,\n            updated\n        FROM apply\n        WHERE id = $1 AND is_valid = TRUE;  -- Only fetch valid apply requests\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tele_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "chat_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "role_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "51784fd974cbdedf36452e9c595c3cca4229bb0e65c56b3838cb1cf9a363a9dd"
+}

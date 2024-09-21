@@ -1,0 +1,117 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH existing_user AS (\n            SELECT 1\n            FROM usrs\n            WHERE tele_id = $1 AND is_valid = TRUE\n        )\n        INSERT INTO usrs (tele_id, name, ops_name, role_type, usr_type, admin)\n        SELECT $1, $2, $3, $4, $5, $6\n        WHERE NOT EXISTS (SELECT * FROM existing_user)\n        RETURNING\n            id,\n            tele_id,\n            name,\n            ops_name,\n            usr_type AS \"usr_type: _\",\n            role_type AS \"role_type: _\",\n            admin,\n            created,\n            updated\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tele_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "role_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        },
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9b62dffe4ba381a97fb4935a5e57fe762e790e8ad242017e1d33d5e891797f12"
+}

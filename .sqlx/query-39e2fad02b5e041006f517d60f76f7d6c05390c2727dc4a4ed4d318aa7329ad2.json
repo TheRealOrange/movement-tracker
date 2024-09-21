@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE apply\n        SET is_valid = FALSE  -- Soft delete by marking as invalid\n        WHERE id = $1 AND is_valid = TRUE;  -- Only update if the record is valid\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "39e2fad02b5e041006f517d60f76f7d6c05390c2727dc4a4ed4d318aa7329ad2"
+}

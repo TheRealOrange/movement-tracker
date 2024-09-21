@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT EXISTS(\n            SELECT 1\n            FROM apply\n            WHERE apply.tele_id = $1\n            AND apply.is_valid = TRUE  -- Only check valid apply requests\n        ) AS \"exists!\";\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "150390f23cb4ba146a404605cba0f5868206718c8c8e366b4321ef7bc189b2a4"
+}

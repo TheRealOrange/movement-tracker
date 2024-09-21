@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE notification_settings\n        SET is_valid = FALSE\n        WHERE chat_id = $1 AND is_valid = TRUE;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2698792196d151d13e62157b43442f1936c2389930ade3b35e1391e6a800e197"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE usrs\n        SET is_valid = FALSE\n        WHERE tele_id = $1 AND is_valid = TRUE;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c749151c44def0da05ec963a342de421988f2eec3a33819987384877749b8d8a"
+}

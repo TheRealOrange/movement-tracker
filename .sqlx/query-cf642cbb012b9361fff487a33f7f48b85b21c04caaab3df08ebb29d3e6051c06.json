@@ -1,0 +1,81 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO notification_settings (\n            chat_id,\n            notif_system,\n            notif_register,\n            notif_availability,\n            notif_plan,\n            notif_conflict\n        )\n        VALUES ($1, COALESCE($2, FALSE), COALESCE($3, FALSE), COALESCE($4, FALSE), COALESCE($5, FALSE), COALESCE($6, FALSE))\n        ON CONFLICT (chat_id) DO UPDATE SET\n            notif_system = COALESCE($2, notification_settings.notif_system),\n            notif_register = COALESCE($3, notification_settings.notif_register),\n            notif_availability = COALESCE($4, notification_settings.notif_availability),\n            notif_plan = COALESCE($5, notification_settings.notif_plan),\n            notif_conflict = COALESCE($6, notification_settings.notif_conflict),\n            updated = NOW()\n        RETURNING\n            id,\n            chat_id,\n            notif_system,\n            notif_register,\n            notif_availability,\n            notif_plan,\n            notif_conflict,\n            created,\n            updated,\n            is_valid;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "chat_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "notif_system",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "notif_register",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "notif_availability",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "notif_plan",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "notif_conflict",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_valid",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf642cbb012b9361fff487a33f7f48b85b21c04caaab3df08ebb29d3e6051c06"
+}

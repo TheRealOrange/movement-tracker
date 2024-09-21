@@ -1,0 +1,118 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH conflicting_user AS (\n            SELECT 1\n            FROM usrs\n            WHERE tele_id = $1 AND id != $2 AND is_valid = TRUE\n        )\n        UPDATE usrs\n        SET\n            tele_id = $1,\n            name = $3,\n            ops_name = $4,\n            usr_type = $5,\n            role_type = $6,\n            admin = $7\n        WHERE id = $2 AND is_valid = TRUE\n        AND NOT EXISTS (SELECT * FROM conflicting_user)\n        RETURNING\n            id,\n            tele_id,\n            name,\n            ops_name,\n            usr_type AS \"usr_type: _\",\n            role_type AS \"role_type: _\",\n            admin,\n            created,\n            updated\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tele_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "role_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        },
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9f905a3b6ef335550962a206a8d773d4f2127626dcbd4ddd62084a075633198a"
+}

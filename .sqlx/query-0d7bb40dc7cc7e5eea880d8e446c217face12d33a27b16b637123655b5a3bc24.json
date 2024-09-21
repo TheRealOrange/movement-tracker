@@ -1,0 +1,89 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            apply.id AS id,\n            apply.tele_id AS tele_id,\n            apply.chat_username AS chat_username,\n            apply.name AS name,\n            apply.ops_name AS ops_name,\n            apply.usr_type AS \"usr_type: _\",\n            apply.role_type AS \"role_type: _\",\n            apply.created AS created,\n            apply.updated AS updated\n        FROM apply\n        WHERE apply.is_valid = TRUE;  -- Fetch only valid apply requests\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tele_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "chat_username",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "role_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0d7bb40dc7cc7e5eea880d8e446c217face12d33a27b16b637123655b5a3bc24"
+}

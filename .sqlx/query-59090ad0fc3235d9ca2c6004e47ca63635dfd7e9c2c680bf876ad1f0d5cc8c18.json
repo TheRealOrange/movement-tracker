@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH invalidated AS (\n            -- Invalidate any existing valid application for this tele_id\n            UPDATE apply\n            SET is_valid = FALSE\n            WHERE tele_id = $1 AND is_valid = TRUE\n            RETURNING *\n        )\n        INSERT INTO apply (tele_id, chat_username, name, ops_name, role_type, usr_type)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        RETURNING id;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        },
+        {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "59090ad0fc3235d9ca2c6004e47ca63635dfd7e9c2c680bf876ad1f0d5cc8c18"
+}

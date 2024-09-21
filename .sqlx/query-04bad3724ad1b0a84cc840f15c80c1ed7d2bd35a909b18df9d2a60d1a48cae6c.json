@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE usrs\n        SET is_valid = FALSE\n        WHERE id = $1 AND is_valid = TRUE;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "04bad3724ad1b0a84cc840f15c80c1ed7d2bd35a909b18df9d2a60d1a48cae6c"
+}
