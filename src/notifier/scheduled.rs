@@ -139,8 +139,8 @@ fn format_detailed_notification(availability: &Availability, user: &Usr) -> Resu
     // Handle optional remarks with truncation and escaping
     let remarks_str = match &availability.remarks {
         Some(remarks) => {
-            let truncated = if remarks.len() > 50 {
-                format!("{}...", &remarks[..50])
+            let truncated = if remarks.chars().count() > 50 {
+                format!("{}...", remarks.chars().take(50).collect::<String>())
             } else {
                 remarks.clone()
             };

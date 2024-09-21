@@ -101,11 +101,11 @@ async fn display_availability_forecast(
 
                 // Truncate remarks to a max of 15 characters
                 let remarks_str = if let Some(remarks) = &availability.remarks {
-                    if remarks.len() > 15 {
+                    if remarks.chars().count() > 15 {
                         format!(
                             "{}: {}\\.\\.\\.",
                             saf100_str,
-                            utils::escape_special_characters(&remarks[0..15])
+                            utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str())
                         )
                     } else {
                         format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))

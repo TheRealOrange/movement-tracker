@@ -152,8 +152,14 @@ pub(crate) async fn add_user(
     let result = sqlx::query_as!(
         Usr,
         r#"
+        WITH existing_user AS (
+            SELECT 1
+            FROM usrs
+            WHERE tele_id = $1 AND is_valid = TRUE
+        )
         INSERT INTO usrs (tele_id, name, ops_name, role_type, usr_type, admin)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        SELECT $1, $2, $3, $4, $5, $6
+        WHERE NOT EXISTS (SELECT * FROM existing_user)
         RETURNING
             id,
             tele_id,
@@ -168,8 +174,8 @@ pub(crate) async fn add_user(
         tele_id as i64,
         name,
         ops_name,
-        role_type as RoleType,  // Casting the RoleType enum
-        user_type as UsrType,   // Casting the UsrType enum
+        role_type as RoleType,
+        user_type as UsrType,
         admin
     )
         .fetch_one(conn)
@@ -179,6 +185,10 @@ pub(crate) async fn add_user(
         Ok(user) => {
             log::info!("Added user with tele_id: {}", tele_id);
             Ok(user)
+        }
+        Err(sqlx::Error::RowNotFound) => {
+            log::warn!("User with tele_id: {} already exists", tele_id);
+            Err(sqlx::Error::RowNotFound)
         }
         Err(e) => {
             log::error!("Error adding user: {}", e);
@@ -253,15 +263,21 @@ pub(crate) async fn update_user(
     let result = sqlx::query_as!(
         Usr,
         r#"
+        WITH conflicting_user AS (
+            SELECT 1
+            FROM usrs
+            WHERE tele_id = $1 AND id != $2 AND is_valid = TRUE
+        )
         UPDATE usrs
         SET
             tele_id = $1,
-            name = $2,
-            ops_name = $3,
-            usr_type = $4,
-            role_type = $5,
-            admin = $6
-        WHERE id = $7 AND is_valid = TRUE
+            name = $3,
+            ops_name = $4,
+            usr_type = $5,
+            role_type = $6,
+            admin = $7
+        WHERE id = $2 AND is_valid = TRUE
+        AND NOT EXISTS (SELECT * FROM conflicting_user)
         RETURNING
             id,
             tele_id,
@@ -274,12 +290,12 @@ pub(crate) async fn update_user(
             updated
         "#,
         user_details.tele_id as i64,
+        user_details.id,
         &user_details.name,
         &user_details.ops_name,
         user_details.usr_type.clone() as UsrType,
         user_details.role_type.clone() as RoleType,
-        user_details.admin,
-        user_details.id,
+        user_details.admin
     )
         .fetch_one(conn)
         .await;
@@ -288,6 +304,10 @@ pub(crate) async fn update_user(
         Ok(user) => {
             log::info!("Updated user with id: {}", user_details.id);
             Ok(user)
+        }
+        Err(sqlx::Error::RowNotFound) => {
+            log::warn!("Another user with tele_id: {} already exists", user_details.tele_id);
+            Err(sqlx::Error::RowNotFound)
         }
         Err(e) => {
             log::error!("Error updating user: {}", e);

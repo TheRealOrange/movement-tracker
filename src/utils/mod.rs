@@ -2,6 +2,7 @@ use chrono::{Datelike, Local, NaiveDate};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::HashMap;
+use teloxide::types::User;
 
 static FULL_MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^\s*([A-Za-z]+)[-/\s]+(\d{1,2})(?:st|nd|rd|th)?[-/\s]+(\d{4})\s*$")
@@ -169,11 +170,11 @@ pub(crate) const MAX_NAME_LENGTH: usize = 64;
 pub(crate) const MAX_OPS_NAME_LENGTH: usize = 10;
 
 pub(crate) fn is_valid_name(name: &str) -> bool {
-    name.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+    name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace())
 }
 
 pub(crate) fn is_valid_ops_name(name: &str) -> bool {
-    name.chars().all(|c| c.is_alphabetic() || c.is_whitespace())
+    name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace())
 }
 
 pub(crate) fn cleanup_name(name: &str) -> String {
@@ -187,4 +188,11 @@ pub(crate) fn cleanup_name(name: &str) -> String {
         .join(" ");
 
     single_spaced_name
+}
+
+pub(crate) fn username_link_tag(user: &User) -> String{
+    user.username
+        .as_deref()
+        .map(|username| format!("@{}", username))  // Use @username if available
+        .unwrap_or_else(|| format!("[{}](tg://user?id={})", escape_special_characters(&user.first_name), user.id))  // Use first name and user ID if no username
 }

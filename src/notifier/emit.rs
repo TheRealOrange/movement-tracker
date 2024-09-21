@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use teloxide::prelude::*;
+use teloxide::types::ParseMode;
 use crate::controllers;
 
 async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originator_id: Option<i64>) {
@@ -14,7 +15,7 @@ async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originat
 
         let chat_id = ChatId(chat);
 
-        if let Err(e) = bot.send_message(chat_id.clone(), message).await {
+        if let Err(e) = bot.send_message(chat_id.clone(), message).parse_mode(ParseMode::MarkdownV2).await {
             log::error!("Failed to send message to chat_id {}: {}", chat, e);
         } else {
             log::info!("Successfully sent message to chat_id {}.", chat);

@@ -386,7 +386,7 @@ pub(crate) async fn add_user_avail(
         WITH usr AS (
             SELECT id, ops_name, usr_type
             FROM usrs
-            WHERE tele_id = $5
+            WHERE tele_id = $5 AND is_valid = TRUE
         ),
         upsert_availability AS (
             INSERT INTO availability (usr_id, avail, ict_type, remarks, planned)

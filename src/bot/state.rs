@@ -143,6 +143,7 @@ pub(super) enum State {
     },
     AvailabilityAddRemarks {
         msg_id: MessageId,
+        change_msg_id: MessageId,
         avail_type: Ict,
         avail_dates: Vec<NaiveDate>
     },
@@ -259,8 +260,31 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
             .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
             .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))
-            .branch(case![State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
-        );
+            .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
+        )
+        .branch(case![State::RegisterRole { msg_id }].endpoint(press_button_prompt))
+        .branch(case![State::RegisterType { msg_id, role_type }].endpoint(press_button_prompt))
+        .branch(case![State::RegisterComplete { msg_id, role_type, user_type, name, ops_name }].endpoint(press_button_prompt))
+        .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditPrompt { msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditRole { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditType { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::UserEdit { msg_id, user_details }].endpoint(press_button_prompt))
+        .branch(case![State::UserEditType { msg_id, change_msg_id, user_details }].endpoint(press_button_prompt))
+        .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details }].endpoint(press_button_prompt))
+        .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details }].endpoint(press_button_prompt))
+        .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::Saf100Select { msg_id }].endpoint(press_button_prompt))
+        .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
+        .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModify { msg_id, availability_entry, availability_list, action, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
+        .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(press_button_prompt));
     
 
     let callback_query_handler = Update::filter_callback_query()
@@ -289,13 +313,31 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_callback))
         .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
-        .branch(case![State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
+        .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
         .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
         .branch(callback_query_handler)
         .branch(endpoint(invalid_state))
+}
+
+async fn press_button_prompt(bot: Bot, msg: Message, dialogue: MyDialogue) -> HandlerResult {
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(ref user) = msg.from {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::Start).await?;
+        return Ok(());
+    };
+    
+    send_msg(
+        bot.send_message(user.id, "Please press a button"),
+        &(user.username)
+    ).await;
+    
+    Ok(())
 }
 
 async fn check_private(bot: Bot, msg: Message) -> bool {

@@ -34,7 +34,7 @@ $$ LANGUAGE plpgsql;
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS usrs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tele_id INT8 UNIQUE NOT NULL,
+    tele_id INT8 NOT NULL,
     name TEXT NOT NULL,
     ops_name TEXT UNIQUE NOT NULL,
     usr_type user_type_enum NOT NULL,
@@ -52,11 +52,18 @@ FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
+DO $$ BEGIN
+    -- Ensure there is only one (tele_id, is_valid = true) in the usrs table
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_tele_id_unique_valid
+    ON usrs (tele_id)
+    WHERE is_valid = TRUE;
+END $$ LANGUAGE plpgsql;
+
 
 DO $$ BEGIN
 CREATE TABLE IF NOT EXISTS apply (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tele_id INT8 UNIQUE NOT NULL,
+    tele_id INT8 NOT NULL,
     chat_username TEXT NOT NULL,
     name TEXT NOT NULL,
     ops_name TEXT UNIQUE NOT NULL,
@@ -72,6 +79,13 @@ CREATE TRIGGER apply_update
 BEFORE UPDATE ON apply
 FOR EACH ROW
 EXECUTE PROCEDURE trigger_set_timestamp();
+END $$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+    -- Ensure there is only one (tele_id, is_valid = true) in the apply table
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_tele_id_unique_valid
+    ON apply (tele_id)
+    WHERE is_valid = TRUE;
 END $$ LANGUAGE plpgsql;
 
 

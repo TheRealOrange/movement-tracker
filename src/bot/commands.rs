@@ -55,8 +55,9 @@ pub(super) enum PrivilegedCommands {
 // Function to set commands and menu buttons
 pub(super) async fn set_menu_buttons(bot: Bot, chat_id: ChatId, user_id: UserId, is_admin: bool, is_public: bool) {
     let mut commands: Vec<BotCommand> = Commands::bot_commands().to_vec();
-
-    // If the user is an admin, append privileged commands
+    
+    log::info!("Setting menu buttons for chat ({}): admin: {}, public: {}", chat_id.0, is_admin, is_public);
+    // If the user is an admin, and not in a public chat, append privileged commands
     if is_admin && !is_public {
         let mut privileged_commands = PrivilegedCommands::bot_commands().to_vec();
         commands.append(&mut privileged_commands);

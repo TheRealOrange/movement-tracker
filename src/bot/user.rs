@@ -204,6 +204,7 @@ pub(super) async fn user_edit_prompt(
         Some(option) => {
             match option.as_str() {
                 "DONE" => {
+                    log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                     match controllers::user::update_user(
                         &pool,
                         &user_details
@@ -211,7 +212,7 @@ pub(super) async fn user_edit_prompt(
                         Ok(user_updated) => {
                             send_msg(
                                 bot.send_message(dialogue.chat_id(), format!(
-                                    "Updates user details\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nIS ADMIN: {}\nADDED: {}\nUPDATED: {}\n",
+                                    "Updated user details\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nIS ADMIN: {}\nADDED: {}\nUPDATED: {}\n",
                                     user_updated.name,
                                     user_updated.ops_name,
                                     user_updated.role_type.as_ref(),
@@ -243,24 +244,28 @@ pub(super) async fn user_edit_prompt(
                     dialogue.update(State::Start).await?
                 }
                 "NAME" => {
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                     match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(change_msg_id) => dialogue.update(State::UserEditName { msg_id, change_msg_id, user_details }).await?
                     };
                 }
                 "OPS NAME" => {
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                     match display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(change_msg_id) => dialogue.update(State::UserEditOpsName { msg_id, change_msg_id, user_details }).await?
                     };
                 }
                 "TYPE" => {
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                     match display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(change_msg_id) => dialogue.update(State::UserEditType { msg_id, change_msg_id, user_details }).await?
                     };
                 }
                 "ADMIN" => {
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                     match display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(change_msg_id) => dialogue.update(State::UserEditAdmin { msg_id, change_msg_id, user_details }).await?
@@ -529,6 +534,7 @@ pub(super) async fn user_edit_delete(
             if make_admin_input == "YES" {
                 match controllers::user::remove_user_by_uuid(&pool, user_details.id).await {
                     Ok(success) => {
+                        log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
                         if success {
                             send_msg(
                                 bot.send_message(dialogue.chat_id(), format!("Successfully removed user: {}", user_details.ops_name)),

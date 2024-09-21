@@ -13,29 +13,31 @@ pub(crate) async fn apply_user(
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         r#"
+        WITH invalidated AS (
+            -- Invalidate any existing valid application for this tele_id
+            UPDATE apply
+            SET is_valid = FALSE
+            WHERE tele_id = $1 AND is_valid = TRUE
+            RETURNING *
+        )
         INSERT INTO apply (tele_id, chat_username, name, ops_name, role_type, usr_type)
         VALUES ($1, $2, $3, $4, $5, $6)
-        ON CONFLICT (tele_id) DO NOTHING;
+        RETURNING id;
         "#,
-        tele_id as i64,   // Assuming `tele_id` is INT8 (bigint), so we cast `u64` to `i64`.
+        tele_id as i64,   // `tele_id` is INT8 (bigint), so we cast `u64` to `i64`.
         chat_username,
         name,
         ops_name,
-        role_type as RoleType,  // Enum cast to DB-compatible type
-        user_type as UsrType    // Enum cast to DB-compatible type
+        role_type as RoleType,
+        user_type as UsrType 
     )
-        .execute(conn)
+        .fetch_one(conn)
         .await;
 
     match result {
-        Ok(query_result) => {
-            if query_result.rows_affected() == 1 {
-                log::info!("User with tele_id: ({}) and name: ({}) applied", tele_id, name);
-                Ok(true)  // Application was successful
-            } else {
-                log::info!("User with tele_id: ({}) already applied", tele_id);
-                Ok(false)  // User already applied, no new row inserted
-            }
+        Ok(_) => {
+            log::info!("User with tele_id: ({}) and name: ({}) successfully applied", tele_id, name);
+            Ok(true)  // Application was successful
         }
         Err(e) => {
             log::error!("Error inserting user application: {}", e);

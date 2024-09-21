@@ -484,7 +484,8 @@ pub(super) async fn apply_edit_prompt(
                                     )
                                 ).await {
                                     Ok(_) => {}
-                                    Err(e) => { 
+                                    Err(e) => {
+                                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                                         log::error!("Error editing message ({}): {}", msg_id, e);
                                         send_msg(
                                             bot.send_message(dialogue.chat_id(), "Approved."),
@@ -492,8 +493,7 @@ pub(super) async fn apply_edit_prompt(
                                         ).await;
                                     }
                                 };
-
-                                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                                
                                 dialogue.update(State::Start).await?;
                             }
                             Err(e) => {
@@ -533,6 +533,7 @@ pub(super) async fn apply_edit_prompt(
                 }
             }
             "NAME" => {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 // Edit name
                 match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,
@@ -540,6 +541,7 @@ pub(super) async fn apply_edit_prompt(
                 }
             }
             "OPS NAME" => {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 // Edit OPS name
                 match display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,
@@ -547,6 +549,7 @@ pub(super) async fn apply_edit_prompt(
                 }
             }
             "ROLE" => {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 // Edit role
                 match display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,
@@ -554,6 +557,7 @@ pub(super) async fn apply_edit_prompt(
                 }
             }
             "TYPE" => {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 // Edit user type
                 match display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,
@@ -561,6 +565,7 @@ pub(super) async fn apply_edit_prompt(
                 }
             }
             "ADMIN" => {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 // Edit admin status
                 match display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,

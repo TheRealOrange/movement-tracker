@@ -1,7 +1,7 @@
 use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
 use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
@@ -327,14 +327,14 @@ pub(super) async fn register_ops_name(
                     // OPS name is unique, proceed with registration
                     log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                     match display_register_confirmation(&bot, dialogue.chat_id(), &user.username, &name, &ops_name, &role_type, &user_type).await {
-                        None => {}
+                        None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => {
                             dialogue.update(State::RegisterComplete {
                                 msg_id: new_msg_id,
                                 role_type,
                                 user_type,
                                 name,
-                                ops_name: ops_name
+                                ops_name
                             }).await?;
                         }
                     };
@@ -406,8 +406,10 @@ pub(super) async fn register_complete(
                         notifier::emit::register_notifications(
                             &bot,
                             format!(
-                                "User @{} has applied:\nOPS NAME:{}\nNAME:{}",
-                                &q.from.username.as_deref().unwrap_or("none"), ops_name, name
+                                "User {} has applied:\nOPS NAME: {}\nNAME: {}",
+                                utils::username_link_tag(&q.from),
+                                ops_name,
+                                name
                             ).as_str(),
                             &pool,
                         ).await;

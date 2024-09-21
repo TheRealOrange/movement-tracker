@@ -4,9 +4,9 @@ use rand::Rng;
 use sqlx::PgPool;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
-use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
 use crate::bot::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
-use crate::{controllers, log_endpoint_hit};
+use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State;
 use crate::types::NotificationSettings;
 
@@ -46,13 +46,13 @@ fn create_inline_keyboard(settings: &NotificationSettings, prefix: &String) -> I
     InlineKeyboardMarkup::new(buttons)
 }
 
-async fn display_inchat_config_notification(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_inchat_config_notification(bot: &Bot, chat_id: ChatId, user: &User) {
     send_msg(
         bot.send_message(chat_id, format!(
-            "@{} is configuring notification settings for this chat",
-            username.as_deref().unwrap_or("none")
-        )),
-        username,
+            "{} is configuring notification settings for this chat",
+            utils::username_link_tag(&user)
+        )).parse_mode(ParseMode::MarkdownV2),
+        &user.username,
     ).await;
 }
 
@@ -121,7 +121,7 @@ pub(super) async fn notify(
         // The chat is private (a DM).
     } else {
         // The chat is not a DM (could be a group, supergroup, or channel).
-        display_inchat_config_notification(&bot, dialogue.chat_id(), &user.username).await;
+        display_inchat_config_notification(&bot, dialogue.chat_id(), user).await;
     }
 
     // Fetch existing notification settings for the chat
@@ -233,8 +233,8 @@ pub(super) async fn notify_settings(
                                 if dialogue.chat_id() != chat_id {
                                     send_msg(
                                         bot.send_message(chat_id, format!(
-                                            "@{} has updated notification settings for chat: {}",
-                                            &q.from.username.as_deref().unwrap_or("none"),
+                                            "{} has updated notification settings for chat:\n{}",
+                                            utils::username_link_tag(&q.from),
                                             format_notification_settings(&settings)
                                         )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
                                         &q.from.username,
@@ -255,9 +255,9 @@ pub(super) async fn notify_settings(
                         if dialogue.chat_id() != chat_id {
                             send_msg(
                                 bot.send_message(chat_id, format!(
-                                    "@{} has aborted updating notifications",
-                                    &q.from.username.as_deref().unwrap_or("none")
-                                )),
+                                    "{} has aborted updating notifications",
+                                    utils::username_link_tag(&q.from)  // Use first name and user ID if no username
+                                )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
                                 &q.from.username,
                             ).await;
                         }
@@ -274,9 +274,9 @@ pub(super) async fn notify_settings(
                                 if dialogue.chat_id() != chat_id {
                                     send_msg(
                                         bot.send_message(chat_id, format!(
-                                            "@{} has disabled notifications",
-                                            &q.from.username.as_deref().unwrap_or("none")
-                                        )),
+                                            "{} has disabled notifications",
+                                            utils::username_link_tag(&q.from)
+                                        )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
                                         &q.from.username,
                                     ).await;
                                 }

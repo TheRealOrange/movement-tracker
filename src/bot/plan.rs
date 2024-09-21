@@ -1,4 +1,4 @@
-use super::{handle_error, send_msg, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
@@ -38,10 +38,10 @@ fn get_user_availability_keyboard(
                 "PLAN"
             };
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.len() > 8 {
-                    format!(", {}...", &remarks[0..8])
+                if remarks.chars().count() > 8 {
+                    format!(", {}...", remarks.chars().take(8).collect::<String>().as_str())
                 } else {
-                    format!(", {}", &remarks)
+                    format!(", {}", remarks)
                 }
             } else {
                 "".to_string()
@@ -102,10 +102,10 @@ fn get_date_availability_keyboard(
                 "PLAN"
             };
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.len() > 8 {
-                    format!(", {}...", &remarks[0..8])
+                if remarks.chars().count() > 8 {
+                    format!(", {}...", remarks.chars().take(8).collect::<String>())
                 } else {
-                    format!(", {}", &remarks)
+                    format!(", {}", remarks)
                 }
             } else {
                 "".to_string()
@@ -180,8 +180,8 @@ fn get_user_availability_text(
 
             // Truncate remarks to a max of 15 characters
             let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.len() > 15 {
-                    format!("{}: {}...", saf100_str, utils::escape_special_characters(&remarks[0..15]))
+                if remarks.chars().count() > 15 {
+                    format!("{}: {}...", saf100_str, utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
                 } else {
                     format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
                 }
@@ -229,8 +229,8 @@ fn get_date_availability_text(
 
             // Truncate remarks to a max of 15 characters
             let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.len() > 15 {
-                    format!("{}: {}...", saf100_str, utils::escape_special_characters(&remarks[0..15]))
+                if remarks.chars().count() > 15 {
+                    format!("{}: {}...", saf100_str, utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
                 } else {
                     format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
                 }
@@ -725,6 +725,7 @@ pub(super) async fn plan_view(
                     msg_id
                 ).await?;
             } else if option == "DONE" {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Done."),
                     &q.from.username,
@@ -747,12 +748,13 @@ pub(super) async fn plan_view(
                                         notifier::emit::plan_notifications(
                                             &bot,
                                             format!(
-                                                "{}{} {} for {} on {}",
+                                                "{}{} {} for {} on {} by {}",
                                                 availability_details.ops_name,
-                                                if availability_details.usr_type == UsrType::NS {" (NS)"} else {""},
+                                                if availability_details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                                                 if availability_details.planned { "has been planned" } else { "is no longer planned" },
                                                 availability_details.ict_type.as_ref(),
-                                                availability_details.avail.format("%Y-%m-%d")
+                                                utils::escape_special_characters(&availability_details.avail.format("%Y-%m-%d").to_string()),
+                                                utils::username_link_tag(&q.from)
                                             ).as_str(),
                                             &pool,
                                             q.from.id.0 as i64

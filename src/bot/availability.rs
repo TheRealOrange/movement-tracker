@@ -31,8 +31,8 @@ fn get_availability_edit_keyboard(
         .iter()
         .filter_map(|entry| {
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.len() > 8 {
-                    format!(", {}...", &remarks[0..8])
+                if remarks.chars().count() > 8 {
+                    format!(", {}...", remarks.chars().take(8).collect::<String>())
                 } else {
                     format!(", {}", remarks)
                 }
@@ -117,10 +117,10 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
         output_text.push_str("Here are the upcoming dates for which you have indicated availability:\n");
         for availability in existing {
             let truncated_remarks = if let Some(remarks) = &availability.remarks {
-                if remarks.len() > 10 {
-                    format!(", {}...", &remarks[0..10])
+                if remarks.chars().count() > 10 {
+                    format!(", {}...", remarks.chars().take(10).collect::<String>())
                 } else {
-                    format!(", {}", &remarks)
+                    format!(", {}", remarks)
                 }
             } else {
                 "".to_string()
@@ -305,7 +305,7 @@ async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, u
     }
 }
 
-async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let options = ["DONE", "CANCEL"]
         .map(|option| InlineKeyboardButton::callback(option, option));
     
@@ -313,7 +313,7 @@ async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<Strin
         bot.send_message(chat_id, "Type your remarks if any (this will be indicated for all the dates you indicated), or /cancel if anything is wrong:")
             .reply_markup(InlineKeyboardMarkup::new([options])),
         username,
-    ).await;
+    ).await
 }
 
 async fn delete_availability_entry_and_go_back(
@@ -340,8 +340,8 @@ async fn delete_availability_entry_and_go_back(
                             format!(
                                 "{}{} has specified they are UNAVAIL on {}",
                                 details.ops_name,
-                                if details.usr_type == UsrType::NS {" (NS)"} else {""},
-                                details.avail.format("%Y-%m-%d")
+                                if details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
+                                utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string()),
                             ).as_str(),
                             &pool,
                             tele_id as i64
@@ -352,10 +352,10 @@ async fn delete_availability_entry_and_go_back(
                             notifier::emit::conflict_notifications(
                                 &bot,
                                 format!(
-                                    "{}{} has specified they are UNAVAIL on {}, but they are PLANNED{}",
+                                    "{}{} has specified they are UNAVAIL on {}\\, but they are PLANNED{}",
                                     details.ops_name,
-                                    if details.usr_type == UsrType::NS {" (NS)"} else {""},
-                                    details.avail.format("%Y-%m-%d"),
+                                    if details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
+                                    utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string()),
                                     if details.saf100 { " SAF100 ISSUED" } else { "" }
                                 ).as_str(),
                                 &pool,
@@ -446,10 +446,10 @@ async fn modify_availability_and_go_back(
                             format!(
                                 "{}{} has specified they are AVAIL for {} on {}{}",
                                 updated.ops_name,
-                                if updated.usr_type == UsrType::NS {" (NS)"} else {""},
+                                if updated.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                                 updated.ict_type.as_ref(),
-                                updated.avail.format("%Y-%m-%d"),
-                                if updated.remarks.is_some() { "\nRemarks: ".to_owned()+updated.remarks.as_deref().unwrap_or("none") } else { "".to_string() }
+                                utils::escape_special_characters(&updated.avail.format("%Y-%m-%d").to_string()),
+                                if updated.remarks.is_some() { "\nRemarks: ".to_owned() + utils::escape_special_characters(updated.remarks.as_deref().unwrap_or("none")).as_str() } else { "".to_string() }
                             ).as_str(),
                             &pool,
                             tele_id as i64
@@ -518,10 +518,10 @@ async fn register_availability(
             format!(
                 "{}{} has specified they are AVAIL for {} on the following dates:\n{}{}",
                 added[0].ops_name,
-                if added[0].usr_type == UsrType::NS {" (NS)"} else {""},
+                if added[0].usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                 avail_type.as_ref(),
-                utils::format_dates_as_markdown(&added_dates),
-                if remarks.is_some() { "\nRemarks: ".to_owned()+remarks.as_deref().unwrap_or("\nnone") } else { "".to_string() }
+                utils::escape_special_characters(&utils::format_dates_as_markdown(&added_dates)),
+                if remarks.is_some() { "\nRemarks: ".to_owned()+utils::escape_special_characters(remarks.as_deref().unwrap_or("\nnone")).as_str() } else { "".to_string() }
             ).as_str(),
             &pool,
             tele_id as i64
@@ -614,6 +614,7 @@ pub(super) async fn availability_view(
                 let action = option.clone();
                 handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, msg_id).await?;
             } else if option == "DONE" {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Returned to start."),
                     &q.from.username,
@@ -652,11 +653,13 @@ pub(super) async fn availability_add_callback(
         }
         Some(option) => {
             if option == "CHANGE TYPE" {
+                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                 match display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await {
                     None => dialogue.update(State::ErrorState).await?,
                     Some(new_msg_id) => dialogue.update(State::AvailabilityAddChangeType { msg_id, change_type_msg_id: new_msg_id, avail_type }).await?
                 }
             } else if option == "CANCEL" {
+                log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                     &q.from.username,
@@ -777,10 +780,10 @@ pub(super) async fn availability_add_message(
 
             // Prepare the output for available dates
             let available_str = if available_dates.is_empty() {
-                "All the dates have already been registered.".to_string()
+                "All the dates have already been registered\\.".to_string()
             } else {
                 format!(
-                    "*Selected dates:* {}\n",
+                    "*Selected dates:* \n{}\n",
                     utils::escape_special_characters(&utils::format_dates_as_markdown(&available_dates))
                 )
             };
@@ -790,7 +793,7 @@ pub(super) async fn availability_add_message(
 
             if !failed_parsing_dates.is_empty() {
                 failed_output_str += &format!(
-                    "\n*Failed to parse the following dates:* {}\n",
+                    "\n*Failed to parse the following dates:* \n{}\n",
                     utils::escape_special_characters(&utils::format_failed_dates_as_markdown(&failed_parsing_dates))
                 );
             }
@@ -798,13 +801,20 @@ pub(super) async fn availability_add_message(
             if !unavailable_dates.is_empty() {
                 let unavailable_dates_str: Vec<String> = unavailable_dates.into_iter().map(|d| d.format("%m/%d/%Y").to_string()).collect();
                 failed_output_str += &format!(
-                    "\n*You have already indicated availability on the following dates. Please use the modify function instead:* {}\n",
+                    "\n*You have already indicated availability on the following dates\\. Please use the modify function instead:* \n{}\n",
                     utils::escape_special_characters(&utils::format_failed_dates_as_markdown(&unavailable_dates_str))
                 );
             }
+            
+            let retry_str = if available_dates.is_empty() {
+                "No available dates were provided or all provided dates have already been registered\\. Please try again with different dates\\.\n\nType the dates for which you want to indicate availability\\. Use *commas\\(only\\)* to separate dates\\. \\(e\\.g\\. Jan 2\\, 28/2\\, 17/04/24\\)"
+            } else {
+                ""
+            };
+            
 
             // Combine the messages
-            let final_output = format!("*Indicated:*\n{}\n{}", available_str, failed_output_str);
+            let final_output = format!("*Indicated:*\n{}\n{}\n{}", available_str, failed_output_str, retry_str);
 
             // Attempt to edit the original message
             let msg_id = match bot.edit_message_text(dialogue.chat_id(), msg_id, final_output.clone())
@@ -829,15 +839,10 @@ pub(super) async fn availability_add_message(
                 Some(msg_id) => {
                     // Proceed if there are available dates to register
                     if !available_dates.is_empty() {
-                        display_add_remarks(&bot, dialogue.chat_id(), &user.username).await;
-                        dialogue.update(State::AvailabilityAddRemarks { msg_id, avail_type, avail_dates: available_dates }).await?
-                    } else {
-                        // Handle the case where no available dates were provided or user is unavailable on all dates
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), "No available dates were provided or all provided dates have already been registered. Please try again with different dates.")
-                                .parse_mode(teloxide::types::ParseMode::MarkdownV2),
-                            &user.username,
-                        ).await;
+                        match display_add_remarks(&bot, dialogue.chat_id(), &user.username).await {
+                            None => dialogue.update(State::ErrorState).await?,
+                            Some(change_msg_id) => dialogue.update(State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates: available_dates }).await?
+                        }
                     }
                 }
             }
@@ -856,13 +861,14 @@ pub(super) async fn availability_add_message(
 pub(super) async fn availability_add_remarks(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, avail_type, avail_dates): (MessageId, Ict, Vec<NaiveDate>),
+    (msg_id, change_msg_id, avail_type, avail_dates): (MessageId, MessageId, Ict, Vec<NaiveDate>),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_remarks", "Message", msg,
         "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
     );
@@ -879,6 +885,7 @@ pub(super) async fn availability_add_remarks(
     match msg.text().map(ToOwned::to_owned) {
         Some(input_remarks) => {
             // add availability to database with the specified remarks
+            log_try_remove_markup(&bot, dialogue.chat_id(), change_msg_id).await;
             register_availability(&bot, &dialogue, &user.username, user.id.0, &avail_dates, &avail_type, Some(input_remarks), &pool, msg_id).await;
 
             dialogue.update(State::Start).await?;
@@ -897,13 +904,14 @@ pub(super) async fn availability_add_remarks(
 pub(super) async fn availability_add_complete(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, avail_type, avail_dates): (MessageId, Ict, Vec<NaiveDate>),
+    (msg_id, change_msg_id, avail_type, avail_dates): (MessageId, MessageId, Ict, Vec<NaiveDate>),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_complete", "Callback", q,
         "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
     );

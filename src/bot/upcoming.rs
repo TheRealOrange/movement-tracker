@@ -38,8 +38,8 @@ pub(super) async fn upcoming(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
 
                     // Remarks, truncated to 20 characters for brevity
                     let remarks_str = if let Some(remarks) = &availability.remarks {
-                        if remarks.len() > 20 {
-                            format!("{}...", &utils::escape_special_characters(&remarks[..20]))
+                        if remarks.chars().count() > 20 {
+                            format!("{}...", &utils::escape_special_characters(remarks.chars().take(20).collect::<String>().as_str()))
                         } else {
                             utils::escape_special_characters(remarks)
                         }
