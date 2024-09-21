@@ -10,7 +10,18 @@ Ensure you have the following installed:
 - [Docker Compose](https://docs.docker.com/compose/)
 - Rust toolchain (`cargo`) for local development
 
-## Getting Started
+## How to use
+
+The docker image is available at
+
+```
+ghcr.io/therealorange/movement-tracker:latest
+```
+Specify the prerequisite environment variables in order to use this application (you must have a PostgreSQL database up!). 
+Refer to the `docker-compose.yml` file for an example of how one may run the application with a database in a Compose stack. 
+(be sure to replace the `build:` directive with the `image:` directive)
+
+## Building
 
 ### 1. Clone the repository
 
