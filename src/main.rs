@@ -5,15 +5,22 @@ mod utils;
 mod notifier;
 
 use std::env;
+use std::path::Path;
 use sqlx::PgPool;
 use crate::controllers::db;
 use teloxide::prelude::*;
 use crate::types::{RoleType, UsrType};
+use warp::Filter;
 
 #[tokio::main]
 async fn main() {
-    // Load environment variables from .env file.
-    dotenvy::dotenv().expect(".env file not found");
+    // Check if .env file exists
+    if Path::new(".env").exists() {
+        dotenvy::dotenv().expect("Failed to load .env file");
+        println!("Loaded environment variables from .env file");
+    } else {
+        println!("No .env file found, using environment variables");
+    }
 
     pretty_env_logger::init();
     log::info!("Initiating connection to database...");
@@ -40,6 +47,16 @@ async fn main() {
     // Start the notifier task
     tokio::spawn(async move {
         notifier::scheduled::start_notifier(notifier_bot, notifier_conn_pool).await;
+    });
+
+    // Define the health check route
+    let health_route = warp::path("health").map(|| "OK");
+
+    // Start the health check server on a separate task
+    tokio::spawn(async move {
+        warp::serve(health_route)
+            .run(([0, 0, 0, 0], 8080))
+            .await;
     });
 
     // Start the bot

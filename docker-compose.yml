@@ -6,24 +6,29 @@ services:
     image: postgres
     restart: always
     environment:
-      POSTGRES_DB: $POSTGRES_DB
-      POSTGRES_USER: $POSTGRES_USER
-      POSTGRES_PASSWORD: $POSTGRES_PASSWD
-    ports:
-      - "127.0.0.1:${POSTGRES_PORT}:5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWD}
     volumes:
       - database_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+      interval: 10s
+      retries: 5
+      timeout: 5s
 
   adminer:
     image: adminer
     restart: always
     environment:
-      ADMINER_DEFAULT_DRIVER: pgsql # server=mysql, pgsql, sqlite, sqlite2, oracle, mssql, mongo, elastic
-      ADMINER_DEFAULT_DB: $POSTGRES_DB
+      ADMINER_DEFAULT_DRIVER: pgsql
+      ADMINER_DEFAULT_DB: ${POSTGRES_DB}
       ADMINER_DEFAULT_SERVER: db
-      ADMINER_DEFAULT_USERNAME: $POSTGRES_USER
-      ADMINER_DEFAULT_PASSWORD: $POSTGRES_PASSWD
+      ADMINER_DEFAULT_USERNAME: ${POSTGRES_USER}
+      ADMINER_DEFAULT_PASSWORD: ${POSTGRES_PASSWD}
     ports:
       - "8080:8080"
     depends_on:
@@ -31,6 +36,31 @@ services:
     configs:
       - source: adminer-index.php
         target: /var/www/html/index.php
+
+  app:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWD}@db:5432/${POSTGRES_DB}"
+      RUST_LOG: ${RUST_LOG}
+      MAX_DB_CONNECTIONS: ${MAX_DB_CONNECTIONS}
+      TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
+      DEFAULT_TELEGRAM_ID: ${DEFAULT_TELEGRAM_ID}
+      DEFAULT_OPS_NAME: ${DEFAULT_OPS_NAME}
+      DEFAULT_USER_NAME: ${DEFAULT_USER_NAME}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && movement-tracker"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  database_data:
+    driver: local
 
 configs:
   adminer-index.php:
@@ -47,7 +77,3 @@ configs:
         }
         include './adminer.php';
       ?>
-
-volumes:
-  database_data:
-    driver: local

@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+#warp for health check endpoint
+warp = "0.3"
 #teloxide dependencies for interaction with the telegram bot api
 teloxide = { version = "0.13", features = ["macros"] }
 log = "0.4"
