@@ -52,6 +52,7 @@ services:
       db:
         condition: service_healthy
     command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && movement-tracker"
+    restart: always
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 30s
