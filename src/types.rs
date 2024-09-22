@@ -126,6 +126,13 @@ pub(crate) struct NotificationSettings {
     pub is_valid: bool,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub(crate) struct UserInfo {
+    pub ops_name: String,
+    pub name: String,
+    pub tele_id: i64,
+}
+
 impl PgHasArrayType for Availability {
     fn array_type_info() -> PgTypeInfo {
         PgTypeInfo::with_name("_availability")

@@ -1,4 +1,4 @@
-use crate::types::{RoleType, Usr, UsrType};
+use crate::types::{RoleType, UserInfo, Usr, UsrType};
 use sqlx::types::Uuid;
 use sqlx::PgPool;
 
@@ -350,12 +350,13 @@ pub(crate) async fn update_user(
     }
 }
 
-// Helper function to get and display all valid OPS names
-pub(crate) async fn get_all_ops_names(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
-    // Fetch all OPS names from the database
-    let result = sqlx::query!(
+// Helper function to get and display all users
+pub(crate) async fn get_all_user_info(pool: &PgPool) -> Result<Vec<UserInfo>, sqlx::Error> {
+    // Fetch ops_name, name, and tele_id from the database where is_valid is true
+    let result = sqlx::query_as!(
+        UserInfo,
         r#"
-        SELECT ops_name
+        SELECT ops_name, name, tele_id
         FROM usrs
         WHERE is_valid = TRUE;
         "#
@@ -364,12 +365,9 @@ pub(crate) async fn get_all_ops_names(pool: &PgPool) -> Result<Vec<String>, sqlx
         .await;
 
     match result {
-        Ok(ops_names) => {
-            // Format the list of OPS names
-            Ok(ops_names.iter().map(|record| record.ops_name.clone()).collect())
-        }
+        Ok(user_infos) => Ok(user_infos),
         Err(e) => {
-            log::error!("Error fetching OPS names: {}", e);
+            log::error!("Error fetching user info: {}", e);
             Err(e)
         }
     }

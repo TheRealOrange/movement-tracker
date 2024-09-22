@@ -1,7 +1,7 @@
 use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{Usr, UsrType};
-use crate::{controllers, log_endpoint_hit};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
 use sqlx::{Error, PgPool};
 use std::str::FromStr;
 use chrono::Local;
@@ -9,7 +9,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 
 fn get_inline_keyboard(is_last_admin: bool, prefix: &String) -> InlineKeyboardMarkup {
     let mut options: Vec<Vec<InlineKeyboardButton>> = ["NAME", "OPS NAME", "TYPE"]
@@ -39,15 +39,15 @@ fn get_inline_keyboard(is_last_admin: bool, prefix: &String) -> InlineKeyboardMa
 }
 
 fn get_user_edit_text(user_details: &Usr) -> String {
-    format!("Details of user:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nIS ADMIN: {}\nADDED: {}\nUPDATED: {}\n\nEdited:{}\nDo you wish to edit any entries?",
-        &user_details.name,
+    format!("Details of user:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUPDATED: _{}_\n\nEdited: _{}_\nDo you wish to edit any entries?",
+        format!("[{}](tg://user?id={})", utils::escape_special_characters(&user_details.name), user_details.tele_id as u64),
         &user_details.ops_name,
         user_details.role_type.as_ref(),
         user_details.usr_type.as_ref(),
-        if user_details.admin == true { "YES" } else { "NO" },
-        &user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-        &user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-        Local::now().format("%d%m %H%M.%S").to_string()
+        if user_details.admin == true { "YES" } else { "NO" }, 
+        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&Local::now().format("%d%m %H%M.%S").to_string())
     )
 }
 
@@ -67,7 +67,8 @@ async fn display_user_edit_prompt(
                 bot.send_message(
                     chat_id,
                     get_user_edit_text(user_details)
-                ).reply_markup(get_inline_keyboard(is_last_admin, prefix)),
+                ).reply_markup(get_inline_keyboard(is_last_admin, prefix))
+                    .parse_mode(ParseMode::MarkdownV2),
                 username
             ).await
         }
@@ -75,6 +76,7 @@ async fn display_user_edit_prompt(
             // Edit message rather than sending
             match bot.edit_message_text(chat_id, msg_id, get_user_edit_text(user_details))
                 .reply_markup(get_inline_keyboard(is_last_admin, prefix))
+                .parse_mode(ParseMode::MarkdownV2)
                 .await {
                 Ok(edited) => Some(edited.id),
                 Err(_) => {
@@ -84,7 +86,8 @@ async fn display_user_edit_prompt(
                         bot.send_message(
                             chat_id,
                             get_user_edit_text(user_details)
-                        ).reply_markup(get_inline_keyboard(is_last_admin, prefix)),
+                        ).reply_markup(get_inline_keyboard(is_last_admin, prefix))
+                            .parse_mode(ParseMode::MarkdownV2),
                         username
                     ).await
                 }
@@ -213,13 +216,69 @@ pub(super) async fn user(
                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
                 }
             } else {
-                // Display a list of valid OPS names and prompt the user to use a correct one
-                if let Ok(result) = controllers::user::get_all_ops_names(&pool).await {
-                    let formatted_list = result.join("\n");
+                if let Ok(result) = controllers::user::get_all_user_info(&pool).await {
+                    // Calculate the length of the longest `ops_name`
+                    let max_len = result.iter()
+                        .map(|info| info.ops_name.len())
+                        .max()
+                        .unwrap_or(0); // Handle case when result is empty
 
-                    // Send the list to the user
+                    // Use `tokio::spawn` to concurrently fetch usernames and format the list
+                    let mut tasks = vec![];
+
+                    for info in result {
+                        let bot_clone = bot.clone();
+                        tasks.push(tokio::spawn(async move {
+                            // Log the ops_name and name before formatting
+                            log::debug!("Formatting user: ops_name: '{}', name: '{}', tele_id: {}", info.ops_name, info.name, info.tele_id);
+
+                            // Dynamically fetch the username using getChat
+                            let mention = match bot_clone.get_chat(ChatId(info.tele_id)).await {
+                                Ok(chat) => {
+                                    if let Some(username) = chat.username() {
+                                        format!("@{}", utils::escape_special_characters(&username)) // Bold and italic username
+                                    } else {
+                                        format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link by tele_id
+                                    }
+                                },
+                                Err(e) => {
+                                    log::error!("Error fetching chat info for user {}: {}", info.tele_id, e);
+                                    format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link if error occurs
+                                }
+                            };
+
+                            // Format each line, ensuring `ops_name` has fixed width based on the longest one
+                            format!(
+                                "\\- *`{:<width$}`* \\- {}", // Format the ops_name with fixed width
+                                utils::escape_special_characters(&info.ops_name), // Escape special characters in ops_name
+                                mention,
+                                width = max_len // Dynamically set the width
+                            )
+                        }));
+                    }
+
+                    // Collect all the tasks and wait for them to complete
+                    let mut formatted_list = Vec::with_capacity(tasks.len());
+                    for task in tasks {
+                        match task.await {
+                            Ok(result) => formatted_list.push(result),
+                            Err(e) => log::error!("Error in task: {}", e),
+                        }
+                    }
+
+                    let formatted_list = formatted_list.join("\n");
+
+                    log::debug!("Formatted text {}", formatted_list);
+
+                    // Construct the message
+                    let message = format!(
+                        "List of users:\n{}\n\nPlease use the command /user <OPS NAME\\> with one of the OPS NAMES listed above to modify user attributes\\.",
+                        formatted_list
+                    );
+
+                    // Send the message to the user
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Valid OPS Names:\n{}\n\nNo such user. Please use the command /user <OPS NAME> with one of the valid OPS names listed above.", formatted_list)),
+                        bot.send_message(dialogue.chat_id(), message).parse_mode(ParseMode::MarkdownV2),
                         &user.username
                     ).await;
                 } else {
@@ -278,17 +337,78 @@ pub(super) async fn user_edit_prompt(
                                 &user_details
                             ).await {
                                 Ok(user_updated) => {
+                                    // Build a list of changes
+                                    let mut changes = Vec::new();
+
+                                    if original_user.name != user_updated.name {
+                                        changes.push(format!(
+                                            "*Name:* {} ➡️ {}",
+                                            original_user.name,
+                                            user_updated.name
+                                        ));
+                                    }
+
+                                    if original_user.ops_name != user_updated.ops_name {
+                                        changes.push(format!(
+                                            "*OPS Name:* `{}` ➡️ `{}`",
+                                            original_user.ops_name,
+                                            user_updated.ops_name
+                                        ));
+                                    }
+
+                                    if original_user.role_type != user_updated.role_type {
+                                        changes.push(format!(
+                                            "*Role:* `{:?}` ➡️ `{:?}`",
+                                            original_user.role_type,
+                                            user_updated.role_type
+                                        ));
+                                    }
+
+                                    if original_user.usr_type != user_updated.usr_type {
+                                        changes.push(format!(
+                                            "*Type:* `{:?}` ➡️ `{:?}`",
+                                            original_user.usr_type,
+                                            user_updated.usr_type
+                                        ));
+                                    }
+
+                                    if original_user.admin != user_updated.admin {
+                                        changes.push(format!(
+                                            "*Admin Status:* {} ➡️ {}",
+                                            if original_user.admin { "YES" } else { "NO" },
+                                            if user_updated.admin { "YES" } else { "NO" }
+                                        ));
+                                    }
+
+                                    // Combine all changes into a single message
+                                    let changes_message = if changes.is_empty() {
+                                        "No changes were made\\.".to_string()
+                                    } else {
+                                        changes.join("\n")
+                                    };
+
+                                    if !changes.is_empty() {
+                                        // Emit system notification with the changes
+                                        notifier::emit::system_notifications(
+                                            &bot,
+                                            &format!(
+                                                "{} has amended user details for *{}*:\n{}",
+                                                utils::username_link_tag(&q.from),
+                                                utils::escape_special_characters(&user_details.ops_name),
+                                                changes_message
+                                            ),
+                                            &pool,
+                                            q.from.id.0 as i64
+                                        ).await;
+                                    }
+
                                     send_msg(
                                         bot.send_message(dialogue.chat_id(), format!(
-                                            "Updated user details\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nIS ADMIN: {}\nADDED: {}\nUPDATED: {}\n",
-                                            user_updated.name,
-                                            user_updated.ops_name,
-                                            user_updated.role_type.as_ref(),
-                                            user_updated.usr_type.as_ref(),
-                                            if user_details.admin == true { "YES" } else { "NO" },
-                                            user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string(),
-                                            user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string()
-                                        )),
+                                            "Updated user details:\n{}\nADDED: _{}_\nUPDATED: _{}_",
+                                            changes_message,
+                                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string()),
+                                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string())
+                                        )).parse_mode(ParseMode::MarkdownV2),
                                         &q.from.username,
                                     ).await;
 
@@ -618,7 +738,26 @@ pub(super) async fn user_edit_delete(
                 match controllers::user::remove_user_by_uuid(&pool, user_details.id).await {
                     Ok(success) => {
                         log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
                         if success {
+                            // Emit system notification to indicate who has deleted the user
+                            notifier::emit::system_notifications(
+                                &bot,
+                                format!(
+                                    "{} has deleted the user:\nOPS NAME: {}\nNAME: {}",
+                                    utils::username_link_tag(&q.from),
+                                    user_details.ops_name,
+                                    format!("[{}](tg://user?id={})", user_details.name, user_details.tele_id as u64)
+                                ).as_str(),
+                                &pool,
+                                q.from.id.0 as i64
+                            ).await;
+
+                            send_msg(
+                                bot.send_message(ChatId(user_details.tele_id), "You have been deregistered."),
+                                &q.from.username,
+                            ).await;
+                            
                             send_msg(
                                 bot.send_message(dialogue.chat_id(), format!("Successfully removed user: {}", user_details.ops_name)),
                                 &q.from.username
