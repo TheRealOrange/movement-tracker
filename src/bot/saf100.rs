@@ -480,7 +480,7 @@ pub(super) async fn saf100_confirm(
         "YES" => {
             match controllers::attendance::set_saf100_true_by_uuid(&pool, availability.id).await {
                 Ok(details) => {
-                    notifier::emit::system_notifications(
+                    notifier::emit::plan_notifications(
                         &bot,
                         format!(
                             "{} has confirmed SAF100 issued for {} on {}",
