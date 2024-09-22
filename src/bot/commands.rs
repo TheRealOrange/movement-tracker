@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use super::HandlerResult;
 use super::{send_msg, MyDialogue};
 use crate::bot::state::State;
@@ -5,6 +6,7 @@ use crate::{controllers, log_endpoint_hit};
 use sqlx::PgPool;
 use teloxide::types::{BotCommand, BotCommandScope, ChatKind, MenuButton, Recipient};
 use teloxide::{prelude::*, utils::command::BotCommands};
+use teloxide::dispatching::dialogue::InMemStorageError;
 
 #[derive(BotCommands, Clone)]
 #[command(
@@ -38,11 +40,11 @@ pub(super) enum Commands {
 pub(super) enum PrivilegedCommands {
     #[command(description = "Approve registration requests")]
     Approve,
-    #[command(description = "Modify user attributes, /user <OPS NAME>")]
+    #[command(description = "Modify user attributes of or delete user, /user to show all, /user <OPS NAME> to modify specific user")]
     User {
         ops_name: String
     },
-    #[command(description = "Plan for flight, /plan <OPS NAME> or /plan <date>")]
+    #[command(description = "Plan a user for flight, /plan <OPS NAME> or /plan <date>")]
     Plan {
         ops_name_or_date: String
     },
@@ -128,8 +130,12 @@ pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgP
     let is_public_chat = matches!(&msg.chat.kind, ChatKind::Public(_));
 
     // Append admin commands to the help message if the user is an admin
-    if is_admin && !is_public_chat {
-        help_str = format!("{}\n\nAdmin Commands:\n{}", help_str, PrivilegedCommands::descriptions());
+    if is_admin {
+        if !is_public_chat {
+            help_str = format!("{}\n\nAdmin Commands:\n{}", help_str, PrivilegedCommands::descriptions());
+        } else {
+            help_str = format!("{}\n{}", help_str, "Use /notfiy to configure notification settings for the current chat");
+        }
     }
 
     send_msg(
@@ -153,11 +159,31 @@ pub(super) async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         return Ok(());
     };
     
-    send_msg(
-        bot.send_message(msg.chat.id, "Cancelling, returning to start!"),
-        &(user.username)
-    ).await;
+    match dialogue.get().await {
+        Ok(current_state) => {
+            match current_state {
+                Some(State::Start) => {
+                    // User is in the Start state; nothing to cancel
+                    send_msg(
+                        bot.send_message(msg.chat.id, "Nothing to cancel."),
+                        &(user.username),
+                    ).await;
+                },
+                _ => {
+                    // User is in an active state; cancel the operation
+                    send_msg(
+                        bot.send_message(msg.chat.id, "Cancelling, returning to start!"),
+                        &(user.username)
+                    ).await;
+
+                    // Reset the dialogue state to Start
+                    dialogue.update(State::Start).await?;
+                }
+            }
+
+        }
+        Err(_) => {}
+    }
     
-    dialogue.update(State::Start).await?;
     Ok(())
 }

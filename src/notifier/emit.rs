@@ -3,12 +3,12 @@ use teloxide::prelude::*;
 use teloxide::types::ParseMode;
 use crate::controllers;
 
-async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originator_id: Option<i64>) {
+async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originator_id: Option<i64>, type_str: &str) {
     for chat in chats_to_send {
         // Check if originator_id is provided and matches the current chat
         if let Some(id) = originator_id {
             if id == chat {
-                log::debug!("Skipping sending message to originator chat_id {}.", chat);
+                log::debug!("Skipping sending {} notification to originator chat_id ({}).", type_str, chat);
                 continue;
             }
         }
@@ -16,9 +16,9 @@ async fn send_helper(bot: &Bot, chats_to_send: Vec<i64>, message: &str, originat
         let chat_id = ChatId(chat);
 
         if let Err(e) = bot.send_message(chat_id.clone(), message).parse_mode(ParseMode::MarkdownV2).await {
-            log::error!("Failed to send message to chat_id {}: {}", chat, e);
+            log::error!("Failed to send {} notification to chat_id ({}): {}", type_str, chat, e);
         } else {
-            log::info!("Successfully sent message to chat_id {}.", chat);
+            log::info!("Successfully sent {} notification to chat_id ({}).", type_str, chat);
         }
     }
 }
@@ -32,7 +32,7 @@ pub(crate) async fn system_notifications(bot: &Bot, message: &str, pool: &PgPool
             }
 
             log::info!("Sending system notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, Some(originator_id)).await;
+            send_helper(bot, chats, message, Some(originator_id), "SYSTEM").await;
         }
         Err(e) => {
             log::error!("Failed to retrieve system notification settings: {}", e);
@@ -49,7 +49,7 @@ pub(crate) async fn register_notifications(bot: &Bot, message: &str, pool: &PgPo
             }
 
             log::info!("Sending register notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, None).await;
+            send_helper(bot, chats, message, None, "REGISTER").await;
         }
         Err(e) => {
             log::error!("Failed to retrieve register notification settings: {}", e);
@@ -66,7 +66,7 @@ pub(crate) async fn availability_notifications(bot: &Bot, message: &str, pool: &
             }
 
             log::info!("Sending availability notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, Some(originator_id)).await;
+            send_helper(bot, chats, message, Some(originator_id), "AVAILABILITY").await;
         }
         Err(e) => {
             log::error!("Failed to retrieve availability notification settings: {}", e);
@@ -83,7 +83,7 @@ pub(crate) async fn plan_notifications(bot: &Bot, message: &str, pool: &PgPool, 
             }
 
             log::info!("Sending plan notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, Some(originator_id)).await;
+            send_helper(bot, chats, message, Some(originator_id), "PLAN").await;
         }
         Err(e) => {
             log::error!("Failed to retrieve plan notification settings: {}", e);
@@ -100,7 +100,7 @@ pub(crate) async fn conflict_notifications(bot: &Bot, message: &str, pool: &PgPo
             }
 
             log::info!("Sending conflict notifications to {} chats. Message: {}", chats.len(), message);
-            send_helper(bot, chats, message, None).await;
+            send_helper(bot, chats, message, None, "CONFLICT").await;
         }
         Err(e) => {
             log::error!("Failed to retrieve conflict notification settings: {}", e);

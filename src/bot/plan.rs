@@ -181,7 +181,7 @@ fn get_user_availability_text(
             // Truncate remarks to a max of 15 characters
             let remarks_str = if let Some(remarks) = &availability.remarks {
                 if remarks.chars().count() > 15 {
-                    format!("{}: {}...", saf100_str, utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
+                    format!("{}: {}\\.\\.\\.", saf100_str, utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
                 } else {
                     format!("{}: {}", saf100_str, utils::escape_special_characters(&remarks))
                 }
@@ -382,27 +382,15 @@ async fn handle_show_avail_by_user(
     show: usize,
 ) -> HandlerResult {
     // Viewing availability by user
-    match display_user_availability(
-        bot,
-        dialogue.chat_id(),
-        username,
-        &user_details,
-        &availability_list,
-        &prefix,
-        start,
-        show,
-        None,
-    ).await {
+    match display_user_availability(bot, dialogue.chat_id(), username, &user_details, &availability_list, &prefix, start, show, None, )
+        .await {
         Ok(msg_id) => {
             log::debug!("Transition to PlanView (viewing by user) with MsgId: {:?}, User: {:?}, Start: {:?}", msg_id, user_details, start);
-            dialogue.update(State::PlanView {
+            dialogue.update(State::PlanView { 
                 msg_id,
                 user_details: Some(user_details),
                 selected_date: None,
-                availability_list,
-                role_type,
-                prefix,
-                start
+                availability_list, role_type, prefix, start
             }).await?;
         }
         Err(_) => dialogue.update(State::ErrorState).await?,
@@ -423,28 +411,14 @@ async fn handle_show_avail_by_date(
     show: usize,
 ) -> HandlerResult {
     // Viewing availability by date
-    match display_date_availability(
-        bot,
-        dialogue.chat_id(),
-        username,
-        &selected_date,
-        &availability_list,
-        &role_type,
-        &prefix,
-        start,
-        show,
-        None
-    ).await {
+    match display_date_availability(bot, dialogue.chat_id(), username, &selected_date, &availability_list, &role_type, &prefix, start, show, None)
+        .await {
         Ok(msg_id) => {
             log::debug!("Transition to PlanView (viewing by date) with MsgId: {:?}, Date: {:?}, Start: {:?}", msg_id, selected_date, start);
-            dialogue.update(State::PlanView {
+            dialogue.update(State::PlanView { 
                 msg_id,
                 user_details: None,
-                selected_date: Some(selected_date),
-                availability_list,
-                role_type,
-                prefix,
-                start
+                selected_date: Some(selected_date), availability_list, role_type, prefix, start
             }).await?;
         }
         Err(_) => dialogue.update(State::ErrorState).await?,
@@ -569,10 +543,11 @@ pub(super) async fn plan(
         .collect();
 
     // Try to interpret the argument as an OPS NAME first
-    match controllers::user::user_exists_ops_name(&pool, ops_name_or_date.as_ref()).await{
+    let cleaned_ops_name = ops_name_or_date.trim().to_uppercase();
+    match controllers::user::user_exists_ops_name(&pool, cleaned_ops_name.as_ref()).await{
         Ok(exists) => {
             if exists {
-                match controllers::user::get_user_by_ops_name(&pool, ops_name_or_date.as_ref()).await {
+                match controllers::user::get_user_by_ops_name(&pool, cleaned_ops_name.as_ref()).await {
                     Ok(user_details) => {
                         // show the dates for which the user is available
                         // Get the user's tele_id
@@ -583,8 +558,7 @@ pub(super) async fn plan(
                                 // Display the user's availability
                                 handle_show_avail_by_user(
                                     &bot, &dialogue, &user.username,
-                                    user_details,
-                                    availability_list,
+                                    user_details, availability_list,
                                     query_user_details.role_type,
                                     prefix, 0, 8,
                                 ).await?;
@@ -618,8 +592,7 @@ pub(super) async fn plan(
                                 // Display the availability for the selected date
                                 handle_show_avail_by_date(
                                     &bot, &dialogue, &user.username,
-                                    selected_date,
-                                    availability_list,
+                                    selected_date, availability_list,
                                     query_user_details.role_type,
                                     prefix, 0, 8
                                 ).await?;
@@ -632,7 +605,7 @@ pub(super) async fn plan(
                         send_msg(
                             bot.send_message(
                                 dialogue.chat_id(),
-                                "Invalid input. Please provide a valid OPS NAME or date.",
+                                "Please use /plan <OPS NAME> (to see availability for a user) or /plan <date> (to see availability for a date).",
                             ),
                             &user.username,
                         )
@@ -694,22 +667,15 @@ pub(super) async fn plan_view(
             ).await;
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
-                user_details,
-                selected_date,
-                availability_list,
-                role_type,
-                prefix, start, 8,
-                msg_id
+                user_details, selected_date, availability_list, role_type,
+                prefix, start, 8, msg_id
             ).await?;
         }
         Some(option) => {
             if option == "PREV" {
                 handle_re_show_options(
                     &bot, &dialogue, &q.from.username,
-                    user_details,
-                    selected_date,
-                    availability_list,
-                    role_type,
+                    user_details, selected_date, availability_list, role_type,
                     prefix, max(0, start as i64 - 8) as usize, 8,
                     msg_id
                 ).await?;
@@ -717,10 +683,7 @@ pub(super) async fn plan_view(
                 let entries_len = availability_list.len();
                 handle_re_show_options(
                     &bot, &dialogue, &q.from.username,
-                    user_details,
-                    selected_date,
-                    availability_list,
-                    role_type,
+                    user_details, selected_date, availability_list, role_type,
                     prefix, if start+8 < entries_len { start+8 } else { start }, 8,
                     msg_id
                 ).await?;
@@ -808,12 +771,8 @@ pub(super) async fn plan_view(
                                         let newstart = if start < availability_list.len()-1 { start } else { max(start as i64 - 8, 0) as usize };
                                         handle_re_show_options(
                                             &bot, &dialogue, &q.from.username,
-                                            user_details,
-                                            selected_date,
-                                            new_availability_list,
-                                            role_type,
-                                            prefix, newstart, 8,
-                                            msg_id
+                                            user_details, selected_date, new_availability_list, role_type,
+                                            prefix, newstart, 8, msg_id
                                         ).await?;
                                     }
                                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
@@ -826,12 +785,8 @@ pub(super) async fn plan_view(
                                 ).await;
                                 handle_re_show_options(
                                     &bot, &dialogue, &q.from.username,
-                                    user_details,
-                                    selected_date,
-                                    availability_list,
-                                    role_type,
-                                    prefix, start, 8,
-                                    msg_id
+                                    user_details, selected_date, availability_list, role_type,
+                                    prefix, start, 8, msg_id
                                 ).await?;
                             }
                         }
@@ -850,10 +805,8 @@ pub(super) async fn plan_view(
                                                     &bot, &dialogue, &q.from.username,
                                                     None,
                                                     Some(selected_date),
-                                                    new_availability_list,
-                                                    role_type_enum,
-                                                    prefix, 0, 8,
-                                                    msg_id
+                                                    new_availability_list, role_type_enum,
+                                                    prefix, 0, 8, msg_id
                                                 ).await?;
                                             }
                                             Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
@@ -866,12 +819,8 @@ pub(super) async fn plan_view(
                                         ).await;
                                         handle_re_show_options(
                                             &bot, &dialogue, &q.from.username,
-                                            user_details,
-                                            selected_date,
-                                            availability_list,
-                                            role_type,
-                                            prefix, start, 8,
-                                            msg_id
+                                            user_details, selected_date, availability_list, role_type,
+                                            prefix, start, 8, msg_id
                                         ).await?;
                                     }
                                 }
@@ -883,12 +832,8 @@ pub(super) async fn plan_view(
                                 ).await;
                                 handle_re_show_options(
                                     &bot, &dialogue, &q.from.username,
-                                    user_details,
-                                    selected_date,
-                                    availability_list,
-                                    role_type,
-                                    prefix, start, 8,
-                                    msg_id
+                                    user_details, selected_date, availability_list, role_type,
+                                    prefix, start, 8, msg_id
                                 ).await?;
                             }
                         }
