@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS usrs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tele_id INT8 NOT NULL,
     name TEXT NOT NULL,
-    ops_name TEXT UNIQUE NOT NULL,
+    ops_name TEXT NOT NULL,
     usr_type user_type_enum NOT NULL,
     role_type role_type_enum NOT NULL,
     admin BOOLEAN NOT NULL DEFAULT FALSE,
@@ -57,6 +57,10 @@ DO $$ BEGIN
     CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_tele_id_unique_valid
     ON usrs (tele_id)
     WHERE is_valid = TRUE;
+    -- Ensure there is only one (ops_name, is_valid = true) in the usrs table
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_ops_name_unique_valid
+    ON usrs (ops_name)
+    WHERE is_valid = TRUE;
 END $$ LANGUAGE plpgsql;
 
 
@@ -66,7 +70,7 @@ CREATE TABLE IF NOT EXISTS apply (
     tele_id INT8 NOT NULL,
     chat_username TEXT NOT NULL,
     name TEXT NOT NULL,
-    ops_name TEXT UNIQUE NOT NULL,
+    ops_name TEXT NOT NULL,
     usr_type user_type_enum NOT NULL,
     role_type role_type_enum NOT NULL,
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -85,6 +89,10 @@ DO $$ BEGIN
     -- Ensure there is only one (tele_id, is_valid = true) in the apply table
     CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_tele_id_unique_valid
     ON apply (tele_id)
+    WHERE is_valid = TRUE;
+    -- Ensure there is only one (ops_name, is_valid = true) in the usrs table
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_ops_name_unique_valid
+    ON apply (ops_name)
     WHERE is_valid = TRUE;
 END $$ LANGUAGE plpgsql;
 
