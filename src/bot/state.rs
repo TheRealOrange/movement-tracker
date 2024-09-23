@@ -9,7 +9,7 @@ use teloxide::dptree::{case, endpoint};
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, MessageId, ReplyParameters};
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
-use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
+use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type, user_select};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
 use crate::bot::forecast::{forecast, forecast_view};
 use crate::bot::plan::{plan, plan_select, plan_view};
@@ -276,6 +276,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditName { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_name))
             .branch(case![State::UserEditOpsName { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_ops_name))
             .branch(case![State::PlanSelect].endpoint(plan_select))
+            .branch(case![State::UserSelect].endpoint(user_select))
         )
         .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
         .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))

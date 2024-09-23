@@ -515,7 +515,7 @@ async fn handle_re_show_options(
     Ok(())
 }
 
-async fn dislpay_retry_message(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+async fn display_retry_message(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
     let retry_msg = "Please type an OPS NAME (to see availability for a user) or a DATE (to see availability for a date). Use /cancel to cancel current action, or use /user to show all users.";
     send_msg(
         bot.send_message(chat_id, retry_msg),
@@ -597,7 +597,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
                     }
                     Err(_) => {
                         // Neither an OPS NAME nor a valid date
-                        dislpay_retry_message(bot, dialogue.chat_id(), &user.username).await;
+                        display_retry_message(bot, dialogue.chat_id(), &user.username).await;
                         dialogue.update(State::PlanSelect).await?;
                     }
                 }
@@ -658,7 +658,7 @@ pub(super) async fn plan_select(
             handle_ops_name_or_date_input(&bot, &dialogue,&pool, &user, ops_name_or_date).await?;
         }
         None => {
-            dislpay_retry_message(&bot, dialogue.chat_id(), &user.username).await;
+            display_retry_message(&bot, dialogue.chat_id(), &user.username).await;
         }
     }
     

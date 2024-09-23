@@ -38,7 +38,7 @@ pub(super) enum Commands {
 pub(super) enum PrivilegedCommands {
     #[command(description = "Approve registration requests")]
     Approve,
-    #[command(description = "Modify user attributes of or delete user, /user to show all, /user <OPS NAME> to modify specific user")]
+    #[command(description = "Modify user attributes of or delete user")]
     User {
         ops_name: String
     },

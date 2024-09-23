@@ -1,6 +1,6 @@
 use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
-use crate::types::{Usr, UsrType};
+use crate::types::{UserInfo, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use sqlx::PgPool;
 use std::str::FromStr;
@@ -9,7 +9,7 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
 
 fn get_inline_keyboard(is_last_admin: bool, prefix: &String) -> InlineKeyboardMarkup {
     let mut options: Vec<Vec<InlineKeyboardButton>> = ["NAME", "OPS NAME", "TYPE"]
@@ -167,25 +167,92 @@ async fn handle_go_back(
     Ok(())
 }
 
-pub(super) async fn user(
-    bot: Bot, 
-    dialogue: 
-    MyDialogue, 
-    msg: Message,
-    ops_name: String,
-    pool: PgPool
-) -> HandlerResult {
-    log_endpoint_hit!(dialogue.chat_id(), "user", "Command", msg);
+async fn display_enter_ops_name(bot: &Bot, dialogue: &MyDialogue, username: &Option<String>, result: Vec<UserInfo>) -> Option<MessageId> {
+    // Calculate the length of the longest `ops_name`
+    let max_len = result.iter()
+        .map(|info| info.ops_name.len())
+        .max()
+        .unwrap_or(0); // Handle case when result is empty
 
-    // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from {
-        user
+    // Use `tokio::spawn` to concurrently fetch usernames and format the list
+    let mut tasks = vec![];
+
+    for info in result {
+        let bot_clone = bot.clone();
+        tasks.push(tokio::spawn(async move {
+            // Log the ops_name and name before formatting
+            log::debug!("Formatting user: ops_name: '{}', name: '{}', tele_id: {}", info.ops_name, info.name, info.tele_id);
+
+            // Dynamically fetch the username using getChat
+            let mention = match bot_clone.get_chat(ChatId(info.tele_id)).await {
+                Ok(chat) => {
+                    if let Some(username) = chat.username() {
+                        format!("@{}", utils::escape_special_characters(&username)) // Bold and italic username
+                    } else {
+                        format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link by tele_id
+                    }
+                },
+                Err(e) => {
+                    log::error!("Error fetching chat info for user {}: {}", info.tele_id, e);
+                    format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link if error occurs
+                }
+            };
+
+            // Format each line, ensuring `ops_name` has fixed width based on the longest one
+            format!(
+                "\\- *`{:<width$}`* \\- {}", // Format the ops_name with fixed width
+                utils::escape_special_characters(&info.ops_name), // Escape special characters in ops_name
+                mention,
+                width = max_len // Dynamically set the width
+            )
+        }));
+    }
+
+    // Collect all the tasks and wait for them to complete
+    let mut formatted_list = Vec::with_capacity(tasks.len());
+    for task in tasks {
+        match task.await {
+            Ok(result) => formatted_list.push(result),
+            Err(e) => log::error!("Error in task: {}", e),
+        }
+    }
+
+    let formatted_list = formatted_list.join("\n");
+
+    log::debug!("Formatted text {}", formatted_list);
+
+    // Construct the message
+    let message = format!(
+        "List of users:\n{}\n\nPlease enter the `OPS NAME` of the user you wish to edit\\.",
+        formatted_list
+    );
+
+    // Send the message to the user
+    send_msg(
+        bot.send_message(dialogue.chat_id(), message).parse_mode(ParseMode::MarkdownV2),
+        username
+    ).await
+}
+
+async fn handle_show_prompt(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, user: &User) -> HandlerResult {
+    if let Ok(result) = controllers::user::get_all_user_info(pool).await {
+        display_enter_ops_name(&bot, &dialogue, &user.username, result).await;
+        dialogue.update(State::UserSelect).await?;
     } else {
-        log::error!("Cannot get user from message");
-        dialogue.update(State::ErrorState).await?;
-        return Ok(());
-    };
-    
+        handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await;
+    }
+
+    Ok(())
+}
+
+async fn display_retry_user_select(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
+    // Send the message to the user
+    send_msg(
+        bot.send_message(chat_id, "Please enter the `OPS NAME` of the user you wish to edit:").parse_mode(ParseMode::MarkdownV2),
+        username
+    ).await
+}
+async fn handle_ops_name_input(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, user: &User, ops_name: String, show_users_on_err: bool) -> HandlerResult {
     let cleaned_ops_name = ops_name.trim().to_uppercase();
 
     // Get the user in the database
@@ -200,7 +267,7 @@ pub(super) async fn user(
                             .take(5)
                             .map(char::from)
                             .collect();
-                        
+
                         let is_last_admin = match controllers::user::is_last_admin(&pool, user_details.id).await {
                             Ok(is_last_admin) => is_last_admin,
                             Err(_) => {
@@ -216,79 +283,74 @@ pub(super) async fn user(
                     Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
                 }
             } else {
-                if let Ok(result) = controllers::user::get_all_user_info(&pool).await {
-                    // Calculate the length of the longest `ops_name`
-                    let max_len = result.iter()
-                        .map(|info| info.ops_name.len())
-                        .max()
-                        .unwrap_or(0); // Handle case when result is empty
-
-                    // Use `tokio::spawn` to concurrently fetch usernames and format the list
-                    let mut tasks = vec![];
-
-                    for info in result {
-                        let bot_clone = bot.clone();
-                        tasks.push(tokio::spawn(async move {
-                            // Log the ops_name and name before formatting
-                            log::debug!("Formatting user: ops_name: '{}', name: '{}', tele_id: {}", info.ops_name, info.name, info.tele_id);
-
-                            // Dynamically fetch the username using getChat
-                            let mention = match bot_clone.get_chat(ChatId(info.tele_id)).await {
-                                Ok(chat) => {
-                                    if let Some(username) = chat.username() {
-                                        format!("@{}", utils::escape_special_characters(&username)) // Bold and italic username
-                                    } else {
-                                        format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link by tele_id
-                                    }
-                                },
-                                Err(e) => {
-                                    log::error!("Error fetching chat info for user {}: {}", info.tele_id, e);
-                                    format!("__[{}](tg://user?id={})__", utils::escape_special_characters(&info.name), info.tele_id as u64) // Fallback to link if error occurs
-                                }
-                            };
-
-                            // Format each line, ensuring `ops_name` has fixed width based on the longest one
-                            format!(
-                                "\\- *`{:<width$}`* \\- {}", // Format the ops_name with fixed width
-                                utils::escape_special_characters(&info.ops_name), // Escape special characters in ops_name
-                                mention,
-                                width = max_len // Dynamically set the width
-                            )
-                        }));
-                    }
-
-                    // Collect all the tasks and wait for them to complete
-                    let mut formatted_list = Vec::with_capacity(tasks.len());
-                    for task in tasks {
-                        match task.await {
-                            Ok(result) => formatted_list.push(result),
-                            Err(e) => log::error!("Error in task: {}", e),
-                        }
-                    }
-
-                    let formatted_list = formatted_list.join("\n");
-
-                    log::debug!("Formatted text {}", formatted_list);
-
-                    // Construct the message
-                    let message = format!(
-                        "List of users:\n{}\n\nPlease use the command /user <OPS NAME\\> with one of the OPS NAMES listed above to modify user attributes\\.",
-                        formatted_list
-                    );
-
-                    // Send the message to the user
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), message).parse_mode(ParseMode::MarkdownV2),
-                        &user.username
-                    ).await;
+                if show_users_on_err {
+                    handle_show_prompt(&bot, &dialogue,&pool, &user).await?;
                 } else {
-                    handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
+                    // Send the message to the user
+                    display_retry_user_select(&bot, dialogue.chat_id(), &user.username).await;
+                    dialogue.update(State::UserSelect).await?;
                 }
             }
         }
         Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
     
+    Ok(())
+}
+
+pub(super) async fn user(
+    bot: Bot, 
+    dialogue: MyDialogue, 
+    msg: Message,
+    ops_name: String,
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "user", "Command", msg);
+
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(user) = msg.from {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::ErrorState).await?;
+        return Ok(());
+    };
+    
+    if !ops_name.is_empty() {
+        handle_ops_name_input(&bot, &dialogue, &pool, &user, ops_name, true).await?;
+    } else {
+        handle_show_prompt(&bot, &dialogue,&pool, &user).await?;
+    }
+    
+    Ok(())
+}
+
+pub(super) async fn user_select(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "user_select", "Message", msg);
+
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(ref user) = msg.from {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::ErrorState).await?;
+        return Ok(());
+    };
+
+    match msg.text().map(ToOwned::to_owned) {
+        Some(ops_name) => {
+            handle_ops_name_input(&bot, &dialogue, &pool, &user, ops_name, false).await?;
+        }
+        None => {
+            display_retry_user_select(&bot, dialogue.chat_id(), &user.username).await;
+        }
+    }
+
     Ok(())
 }
 
