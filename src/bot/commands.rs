@@ -1,4 +1,3 @@
-use std::fmt::Debug;
 use super::HandlerResult;
 use super::{send_msg, MyDialogue};
 use crate::bot::state::State;
@@ -6,7 +5,6 @@ use crate::{controllers, log_endpoint_hit};
 use sqlx::PgPool;
 use teloxide::types::{BotCommand, BotCommandScope, ChatKind, MenuButton, Recipient};
 use teloxide::{prelude::*, utils::command::BotCommands};
-use teloxide::dispatching::dialogue::InMemStorageError;
 
 #[derive(BotCommands, Clone)]
 #[command(
@@ -22,11 +20,11 @@ pub(super) enum Commands {
     Register,
     #[command(description = "Indicate or modify your availability (for SANS)")]
     Availability,
-    #[command(description = "View upcoming planned")]
+    #[command(description = "View upcoming planned for yourself")]
     Upcoming,
     // #[command(description = "Add information about your movement")]
     // Movement,
-    #[command(description = "View information about the future availability")]
+    #[command(description = "Display information about future availability")]
     Forecast,
     #[command(description = "Cancel current action")]
     Cancel,

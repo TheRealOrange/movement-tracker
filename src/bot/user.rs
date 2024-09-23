@@ -2,7 +2,7 @@ use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, v
 use crate::bot::state::State;
 use crate::types::{Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
-use sqlx::{Error, PgPool};
+use sqlx::PgPool;
 use std::str::FromStr;
 use chrono::Local;
 use rand::distributions::Alphanumeric;
