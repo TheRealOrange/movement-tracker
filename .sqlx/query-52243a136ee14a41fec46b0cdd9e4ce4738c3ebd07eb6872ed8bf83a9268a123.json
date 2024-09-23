@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            usrs.id AS id,\n            usrs.tele_id AS tele_id,\n            usrs.name AS name,\n            usrs.ops_name AS ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            usrs.role_type AS \"role_type: _\",\n            usrs.admin AS admin,\n            usrs.created AS created,\n            usrs.updated AS updated\n        FROM usrs\n        WHERE usrs.id = $1 AND usrs.is_valid = TRUE;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tele_id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "role_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "role_type_enum",
+            "kind": {
+              "Enum": [
+                "pilot",
+                "aro"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "admin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "52243a136ee14a41fec46b0cdd9e4ce4738c3ebd07eb6872ed8bf83a9268a123"
+}

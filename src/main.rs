@@ -22,7 +22,7 @@ async fn main() {
         println!("No .env file found, using environment variables");
     }
 
-    pretty_env_logger::init();
+    pretty_env_logger::init_timed();
     log::info!("Initiating connection to database...");
     let conn_pool = db::init_db().await.expect("Failed to initialize database");
 

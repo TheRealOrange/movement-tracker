@@ -1,8 +1,11 @@
-use sqlx::migrate::MigrateDatabase;
+use sqlx::migrate::{MigrateDatabase, MigrateError, Migrator};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres};
 use std::env;
 use std::error::Error;
+
+// Define a static migrator that looks for migration files in the "migrations" folder.
+static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 pub(crate) async fn init_db() -> Result<PgPool, Box<dyn Error>> {
     log::info!("Establishing connection to db");
@@ -39,6 +42,14 @@ pub(crate) async fn init_db() -> Result<PgPool, Box<dyn Error>> {
         Ok(p) => {
             pool = p;
             log::info!("Database connected");
+
+            // Run the migrations
+            match MIGRATOR.run(&pool).await {
+                Ok(_) => {
+                    log::info!("Database migrations completed");
+                }
+                Err(error) => panic!("Fatal error during database migration: {}", error),
+            };
         }
         Err(error) => panic!("Unable to connect to database: {}", error),
     }

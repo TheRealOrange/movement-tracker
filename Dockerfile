@@ -9,13 +9,18 @@ COPY src ./src
 COPY Cargo.toml Cargo.lock ./
 # Offline query cache for sqlx build, generate with `cargo sqlx prepare`
 COPY .sqlx ./.sqlx
+# Migrations directory
+COPY ./migrations ./migrations
 
 # Build the project checking against the actual database
 RUN cargo install --path .
 
 FROM alpine AS runtime
 RUN apk add --no-cache openssl
-COPY --from=builder /usr/local/cargo/bin/movement-tracker /usr/local/bin/movement-tracker
+# App directory
+WORKDIR /app
+COPY ./migrations /app/migrations
+COPY --from=builder /usr/local/cargo/bin/movement-tracker /app/movement-tracker
 # Expose the health check port
 EXPOSE 8080
-CMD ["movement-tracker"]
+CMD ["/app/movement-tracker"]

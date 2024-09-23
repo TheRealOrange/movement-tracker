@@ -63,10 +63,11 @@ Make sure you replace the `TELOXIDE_TOKEN` and `DEFAULT_TELEGRAM_ID` with valid 
 
 ### 3. Prepare the SQLx Query Cache
 
-The `init.sql` script will initialize your PostgreSQL database with the necessary schema and tables. Ensure that `init.sql` is present in the root directory.
+Using `sqlx migrate run` will initialize your PostgreSQL database with the necessary schema and tables. Ensure that `./migrations` is present in the root directory.
 Assuming you do not have a database up, run
 ```bash
-docker compose up -d db # this starts the postgres database AND initializes it using init.sql
+docker compose up -d db # this starts the postgres database
+sqlx migrate run # This runs all the necessary database migrations and prepares the database
 cargo sqlx prepare # this prepares the offline query cache
 ```
 You are now ready to build the application

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH user_admin AS (\n            SELECT admin\n            FROM usrs\n            WHERE id = $1 AND is_valid = TRUE\n        ), other_admins AS (\n            SELECT COUNT(*) AS count\n            FROM usrs\n            WHERE admin = TRUE AND is_valid = TRUE AND id != $1\n        )\n        SELECT\n            (user_admin.admin = TRUE) AND (other_admins.count = 0) AS is_last_admin\n        FROM user_admin, other_admins;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_last_admin",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bdc92a2c612f354dda1469b481896db9cdc24fc73afbcddacf62253f1d7f5306"
+}
