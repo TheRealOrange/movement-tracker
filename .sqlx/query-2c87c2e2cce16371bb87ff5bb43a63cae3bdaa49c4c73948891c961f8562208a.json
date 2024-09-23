@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH update_availability AS (\n            UPDATE availability\n            SET\n                planned = COALESCE($2, planned),\n                ict_type = COALESCE($3, ict_type),\n                remarks = COALESCE($4, remarks)\n            WHERE id = $1\n            RETURNING *\n        ),\n        notification_handling AS (\n            SELECT\n                update_availability.planned AS new_planned,\n                update_availability.id AS availability_id,\n                update_availability.avail AS avail_date\n            FROM update_availability\n        ),\n        invalidate_notifications AS (\n            UPDATE scheduled_notifications\n            SET is_valid = FALSE\n            WHERE avail_id = (SELECT availability_id FROM notification_handling)\n              AND sent = FALSE\n              AND (SELECT new_planned FROM notification_handling) = FALSE\n            RETURNING id\n        ),\n        schedule_notifications AS (\n            INSERT INTO scheduled_notifications (avail_id, scheduled_time)\n            SELECT\n                (SELECT availability_id FROM notification_handling),\n                times.scheduled_time\n            FROM (\n                -- Immediate Notification\n                SELECT NOW() + INTERVAL '1 mins' AS scheduled_time\n                UNION ALL\n                -- 5 Days Prior Notification (only if at least 5 days remain)\n                SELECT\n                    (SELECT avail_date FROM notification_handling)::timestamp\n                    + INTERVAL '09 hours'\n                    - INTERVAL '5 days' AS scheduled_time\n                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5\n                UNION ALL\n                -- 2 Days Prior Notification (only if at least 2 days remain)\n                SELECT\n                    (SELECT avail_date FROM notification_handling)::timestamp\n                    + INTERVAL '09 hours'\n                    - INTERVAL '2 days' AS scheduled_time\n                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2\n            ) AS times\n            WHERE (SELECT new_planned FROM notification_handling) = TRUE\n            RETURNING id\n        )\n        SELECT\n            update_availability.id,\n            usr.ops_name,\n            usr.usr_type AS \"usr_type: _\",\n            update_availability.avail,\n            update_availability.ict_type AS \"ict_type: _\",\n            update_availability.remarks,\n            update_availability.planned,\n            update_availability.saf100,\n            update_availability.attended,\n            update_availability.is_valid,\n            update_availability.created,\n            update_availability.updated\n        FROM update_availability\n        JOIN usrs AS usr ON update_availability.usr_id = usr.id;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "avail",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 4,
+        "name": "ict_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "ict_enum",
+            "kind": {
+              "Enum": [
+                "live",
+                "sims",
+                "other"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "remarks",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "planned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "saf100",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "attended",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_valid",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        {
+          "Custom": {
+            "name": "ict_enum",
+            "kind": {
+              "Enum": [
+                "live",
+                "sims",
+                "other"
+              ]
+            }
+          }
+        },
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2c87c2e2cce16371bb87ff5bb43a63cae3bdaa49c4c73948891c961f8562208a"
+}
