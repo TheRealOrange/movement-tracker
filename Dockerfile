@@ -16,7 +16,7 @@ COPY ./migrations ./migrations
 RUN cargo install --path .
 
 FROM alpine AS runtime
-RUN apk add --no-cache openssl
+RUN apk add --no-cache openssl curl
 # App directory
 WORKDIR /app
 COPY ./migrations /app/migrations
