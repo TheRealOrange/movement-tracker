@@ -401,7 +401,8 @@ pub(crate) async fn add_user_avail(
                 SET
                     ict_type = EXCLUDED.ict_type,
                     remarks = COALESCE(EXCLUDED.remarks, availability.remarks),
-                    planned = COALESCE(EXCLUDED.planned, availability.planned)
+                    planned = COALESCE(EXCLUDED.planned, availability.planned),
+                    is_valid = TRUE
             RETURNING *
         ),
         notification_handling AS (

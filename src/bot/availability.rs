@@ -784,7 +784,7 @@ pub(super) async fn availability_add_message(
 
             // Attempt to edit the original message
             let msg_id = match bot.edit_message_text(dialogue.chat_id(), msg_id, final_output.clone())
-                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                .parse_mode(ParseMode::MarkdownV2)
                 .await {
                 Ok(new_msg) => Some(new_msg.id),
                 Err(e) => {
@@ -792,7 +792,7 @@ pub(super) async fn availability_add_message(
                     // Send the combined message to the user if editing fails
                     send_msg(
                         bot.send_message(dialogue.chat_id(), final_output)
-                            .parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                            .parse_mode(ParseMode::MarkdownV2),
                         &user.username,
                     ).await
                 }
