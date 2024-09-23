@@ -1,4 +1,4 @@
-use super::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
@@ -10,7 +10,7 @@ use std::cmp::{max, min};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, MessageId, ParseMode, User};
 use uuid::Uuid;
 
 // Generates the inline keyboard for user availability view
@@ -271,7 +271,7 @@ async fn display_user_availability(
     start: usize,
     show: usize,
     msg_id: Option<MessageId>, // Optionally provide MessageId to edit
-) -> Result<MessageId, ()> {
+) -> Result<Option<MessageId>, ()> {
     // Generate the inline keyboard
     let markup = match get_user_availability_keyboard(prefix, availability_list, start, show) {
         Ok(kb) => kb,
@@ -288,34 +288,7 @@ async fn display_user_availability(
     let message_text = get_user_availability_text(user_details, availability_list);
 
     // Send or edit the message
-    match msg_id {
-        Some(id) => {
-            // Edit the existing message
-            match bot.edit_message_text(chat_id, id, message_text)
-                .parse_mode(ParseMode::MarkdownV2)
-                .reply_markup(markup)
-                .await
-            {
-                Ok(_) => Ok(id),
-                Err(e) => {
-                    log::error!("Failed to edit message: {}", e);
-                    Err(())
-                }
-            }
-        }
-        None => {
-            // Send a new message
-            match send_msg(
-                bot.send_message(chat_id, message_text)
-                    .parse_mode(ParseMode::MarkdownV2)
-                    .reply_markup(markup),
-                username
-            ).await {
-                Some(sent_msg) => Ok(sent_msg),
-                None => Err(())
-            }
-        }
-    }
+    Ok(send_or_edit_msg(&bot, chat_id, username, msg_id, message_text, Some(markup), Some(ParseMode::MarkdownV2)).await)
 }
 
 // Displays date availability with pagination using message editing
@@ -330,7 +303,7 @@ async fn display_date_availability(
     start: usize,
     show: usize,
     msg_id: Option<MessageId>, // Optionally provide MessageId to edit
-) -> Result<MessageId, ()> {
+) -> Result<Option<MessageId>, ()> {
     // Generate the inline keyboard
     let markup = match get_date_availability_keyboard(prefix, availability_list, role_type, start, show) {
         Ok(kb) => kb,
@@ -346,35 +319,12 @@ async fn display_date_availability(
     // Generate the message text
     let message_text = get_date_availability_text(selected_date, availability_list);
     
-    // Send or edit the message
-    match msg_id {
-        Some(id) => {
-            // Edit the existing message
-            match bot.edit_message_text(chat_id, id, message_text)
-                .parse_mode(ParseMode::MarkdownV2)
-                .reply_markup(markup)
-                .await
-            {
-                Ok(_) => Ok(id),
-                Err(e) => {
-                    log::error!("Failed to edit message: {}", e);
-                    Err(())
-                }
-            }
-        }
-        None => {
-            // Send a new message
-            match send_msg(
-                bot.send_message(chat_id, message_text)
-                    .parse_mode(ParseMode::MarkdownV2)
-                    .reply_markup(markup),
-                username
-            ).await {
-                Some(sent_msg) => Ok(sent_msg),
-                None => Err(())
-            }
-        }
-    }
+    // Send or edit message
+    Ok(send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(markup), Some(ParseMode::MarkdownV2)).await)
+}
+
+async fn display_plan_changes_confirm(msg_id: Option<MessageId>) -> Option<MessageId> {
+    todo!()
 }
 
 async fn handle_show_avail_by_user(
@@ -392,13 +342,18 @@ async fn handle_show_avail_by_user(
     match display_user_availability(bot, dialogue.chat_id(), username, &user_details, &availability_list, &prefix, start, show, None, )
         .await {
         Ok(msg_id) => {
-            log::debug!("Transition to PlanView (viewing by user) with MsgId: {:?}, User: {:?}, Start: {:?}", msg_id, user_details, start);
-            dialogue.update(State::PlanView { 
-                msg_id,
-                user_details: Some(user_details),
-                selected_date: None,
-                availability_list, role_type, prefix, start
-            }).await?;
+            match msg_id {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(msg_id) => {
+                    log::debug!("Transition to PlanView (viewing by user) with MsgId: {:?}, User: {:?}, Start: {:?}", msg_id, user_details, start);
+                    dialogue.update(State::PlanView {
+                        msg_id,
+                        user_details: Some(user_details),
+                        selected_date: None,
+                        availability_list, role_type, prefix, start
+                    }).await?
+                }
+            }
         }
         Err(_) => dialogue.update(State::ErrorState).await?,
     };
@@ -421,12 +376,17 @@ async fn handle_show_avail_by_date(
     match display_date_availability(bot, dialogue.chat_id(), username, &selected_date, &availability_list, &role_type, &prefix, start, show, None)
         .await {
         Ok(msg_id) => {
-            log::debug!("Transition to PlanView (viewing by date) with MsgId: {:?}, Date: {:?}, Start: {:?}", msg_id, selected_date, start);
-            dialogue.update(State::PlanView { 
-                msg_id,
-                user_details: None,
-                selected_date: Some(selected_date), availability_list, role_type, prefix, start
-            }).await?;
+            match msg_id {
+                None =>  dialogue.update(State::ErrorState).await?,
+                Some(new_msg_id) => {
+                    log::debug!("Transition to PlanView (viewing by date) with MsgId: {:?}, Date: {:?}, Start: {:?}", msg_id, selected_date, start);
+                    dialogue.update(State::PlanView {
+                        msg_id: new_msg_id,
+                        user_details: None,
+                        selected_date: Some(selected_date), availability_list, role_type, prefix, start
+                    }).await?
+                }
+            }
         }
         Err(_) => dialogue.update(State::ErrorState).await?,
     };

@@ -1,5 +1,5 @@
 use crate::bot::state::State;
-use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::types::{Apply, RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use rand::distributions::Alphanumeric;
@@ -12,6 +12,7 @@ use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};
+use crate::bot::user::user;
 
 // Generates the inline keyboard for applications with pagination
 fn get_applications_keyboard(
@@ -94,32 +95,7 @@ async fn display_applications(
     let message_text = get_applications_text(start, slice_end, total);
 
     // Send or edit the message
-    match msg_id {
-        Some(id) => {
-            // Edit the existing message
-            match bot.edit_message_text(chat_id, id, message_text.clone())
-                .reply_markup(markup.clone())
-                .await {
-                Ok(edit_msg) => Ok(Some(edit_msg.id)),
-                Err(e) => {
-                    log::error!("Failed to edit message: {}", e);
-                    Ok(send_msg(
-                        bot.send_message(chat_id, message_text)
-                            .reply_markup(markup),
-                        username
-                    ).await)
-                }
-            }
-        }
-        None => {
-            // Send a new message
-            Ok(send_msg(
-                bot.send_message(chat_id, message_text)
-                    .reply_markup(markup),
-                username
-            ).await)
-        }
-    }
+    Ok(send_or_edit_msg(&bot, chat_id, username, msg_id, message_text, Some(markup), None).await)
 }
 
 // Handles re-showing options during pagination
@@ -187,35 +163,9 @@ async fn display_application_edit_prompt(
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
     options.push(confirm);
-
-    let cloned_keyboard = options.clone();
-
-    let send_new_msg = || async {
-        send_msg(
-            bot.send_message(
-                chat_id,
-                get_application_edit_text(&application, admin)
-            ).reply_markup(InlineKeyboardMarkup::new(cloned_keyboard))
-                .parse_mode(ParseMode::MarkdownV2),
-            username
-        ).await
-    };
-
-    match edit_id {
-        None => {
-            send_new_msg().await
-        }
-        Some(msg_id) => {
-            match bot.edit_message_text(
-                chat_id, msg_id,
-                get_application_edit_text(&application, admin)
-            ).reply_markup(InlineKeyboardMarkup::new(options))
-                .parse_mode(ParseMode::MarkdownV2).await {
-                Ok(edited_msg) => Some(edited_msg.id),
-                Err(_) => send_new_msg().await
-            }
-        }
-    }
+    
+    // Send or edit message
+    send_or_edit_msg(bot, chat_id, username, edit_id, get_application_edit_text(&application, admin), Some(InlineKeyboardMarkup::new(options)), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
@@ -499,28 +449,17 @@ pub(super) async fn apply_edit_prompt(
                                     ).await;
                                 }
                                 
-                                match bot.edit_message_text(
-                                    dialogue.chat_id(), msg_id,
-                                    format!("Approved application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUSERNAME: {}",
-                                            utils::escape_special_characters(&user.name),
-                                            utils::escape_special_characters(&user.ops_name),
-                                            user.role_type.as_ref(),
-                                            user.usr_type.as_ref(),
-                                            if admin == true { "YES" } else { "NO" },
-                                            utils::escape_special_characters(&user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
-                                            format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64)
-                                    )
-                                ).parse_mode(ParseMode::MarkdownV2).await {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                                        log::error!("Error editing message ({}): {}", msg_id, e);
-                                        send_msg(
-                                            bot.send_message(dialogue.chat_id(), "Approved."),
-                                            &q.from.username,
-                                        ).await;
-                                    }
-                                };
+                                let message_text = format!(
+                                    "Approved application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUSERNAME: {}", utils::escape_special_characters(&user.name),
+                                    utils::escape_special_characters(&user.ops_name),
+                                    user.role_type.as_ref(),
+                                    user.usr_type.as_ref(),
+                                    if admin == true { "YES" } else { "NO" },
+                                    utils::escape_special_characters(&user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+                                    format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64)
+                                );
+                                // Send or edit message
+                                send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
                                 
                                 dialogue.update(State::Start).await?;
                             }

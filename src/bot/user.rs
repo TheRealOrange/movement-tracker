@@ -1,4 +1,4 @@
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{UserInfo, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
@@ -60,40 +60,7 @@ async fn display_user_edit_prompt(
     prefix: &String,
     msg_id: Option<MessageId>
 ) -> Option<MessageId> {
-    match msg_id {
-        None => {
-            // Send a new message
-            send_msg(
-                bot.send_message(
-                    chat_id,
-                    get_user_edit_text(user_details)
-                ).reply_markup(get_inline_keyboard(is_last_admin, prefix))
-                    .parse_mode(ParseMode::MarkdownV2),
-                username
-            ).await
-        }
-        Some(msg_id) => {
-            // Edit message rather than sending
-            match bot.edit_message_text(chat_id, msg_id, get_user_edit_text(user_details))
-                .reply_markup(get_inline_keyboard(is_last_admin, prefix))
-                .parse_mode(ParseMode::MarkdownV2)
-                .await {
-                Ok(edited) => Some(edited.id),
-                Err(_) => {
-                    // Failed to edit, send a new message
-                    log_try_delete_msg(&bot, chat_id, msg_id).await;
-                    send_msg(
-                        bot.send_message(
-                            chat_id,
-                            get_user_edit_text(user_details)
-                        ).reply_markup(get_inline_keyboard(is_last_admin, prefix))
-                            .parse_mode(ParseMode::MarkdownV2),
-                        username
-                    ).await
-                }
-            }
-        }
-    }
+    send_or_edit_msg(&bot, chat_id, username, msg_id, get_user_edit_text(user_details), Some(get_inline_keyboard(is_last_admin, prefix)), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {

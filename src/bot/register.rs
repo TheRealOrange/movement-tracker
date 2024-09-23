@@ -1,4 +1,4 @@
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
@@ -420,18 +420,9 @@ pub(super) async fn register_complete(
                             user_type.as_ref(),
                             utils::escape_special_characters(&name), utils::escape_special_characters(&ops_name)
                         );
-
-                        match bot.edit_message_text(dialogue.chat_id(), msg_id, &registration_text_str)
-                            .await {
-                            Ok(_) => {}
-                            Err(_) => {
-                                log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), registration_text_str).parse_mode(ParseMode::MarkdownV2),
-                                    &q.from.username,
-                                ).await;
-                            }
-                        }
+                        
+                        // Send or edit message
+                        send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), registration_text_str, None, Some(ParseMode::MarkdownV2)).await;
                         dialogue.update(State::Start).await?;
                     },
                     Ok(false) => {
