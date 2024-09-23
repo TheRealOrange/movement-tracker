@@ -10,7 +10,7 @@ use std::cmp::{max, min};
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
 use uuid::Uuid;
 
 // Generates the inline keyboard for user availability view
@@ -253,6 +253,13 @@ fn get_date_availability_text(
     message
 }
 
+async fn display_enter_ops_name_or_date(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
+    send_msg(
+        bot.send_message(chat_id, "Please enter an OPS NAME or a DATE:"),
+        username,
+    ).await
+}
+
 // Displays user availability with pagination using message editing
 async fn display_user_availability(
     bot: &Bot,
@@ -338,7 +345,7 @@ async fn display_date_availability(
 
     // Generate the message text
     let message_text = get_date_availability_text(selected_date, availability_list);
-
+    
     // Send or edit the message
     match msg_id {
         Some(id) => {
@@ -508,40 +515,29 @@ async fn handle_re_show_options(
     Ok(())
 }
 
-pub(super) async fn plan(
-    bot: Bot,
-    dialogue: MyDialogue,
-    msg: Message,
-    ops_name_or_date: String,
-    pool: PgPool
-) -> HandlerResult {
-    log_endpoint_hit!(dialogue.chat_id(), "plan", "Command", msg);
+async fn dislpay_retry_message(bot: &Bot, chat_id: ChatId, username: &Option<String>) {
+    let retry_msg = "Please type an OPS NAME (to see availability for a user) or a DATE (to see availability for a date). Use /cancel to cancel current action, or use /user to show all users.";
+    send_msg(
+        bot.send_message(chat_id, retry_msg),
+        username,
+    ).await;
+}
 
-    // Early return if the message has no sender (msg.from() is None)
-    let user = if let Some(user) = msg.from {
-        user
-    } else {
-        log::error!("Cannot get user from message");
-        dialogue.update(State::ErrorState).await?;
-        return Ok(());
-    };
-
+async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, user: &User, ops_name_or_date: String) -> HandlerResult {
     // Get the user in the database to determine their role
-    let query_user_details = match controllers::user::get_user_by_tele_id(&pool, user.id.0).await {
+    let query_user_details = match controllers::user::get_user_by_tele_id(pool, user.id.0).await {
         Ok(user) => user,
         Err(_) => {
-            handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await;
+            handle_error(&bot, dialogue, dialogue.chat_id(), &user.username).await;
             return Ok(())
         },
     };
-
     // Generate random prefix to make the IDs only applicable to this dialogue instance
     let prefix: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(5)
         .map(char::from)
         .collect();
-
     // Try to interpret the argument as an OPS NAME first
     let cleaned_ops_name = ops_name_or_date.trim().to_uppercase();
     match controllers::user::user_exists_ops_name(&pool, cleaned_ops_name.as_ref()).await{
@@ -578,12 +574,11 @@ pub(super) async fn plan(
                             send_msg(
                                 bot.send_message(
                                     dialogue.chat_id(),
-                                    "Please provide a date that is today or in the future.",
+                                    "Please type a date that is today or in the future:",
                                 ),
                                 &user.username,
-                            )
-                                .await;
-                            dialogue.update(State::Start).await?;
+                            ).await;
+                            dialogue.update(State::PlanSelect).await?;
                             return Ok(());
                         }
                         // Show the available users on that day
@@ -602,22 +597,71 @@ pub(super) async fn plan(
                     }
                     Err(_) => {
                         // Neither an OPS NAME nor a valid date
-                        send_msg(
-                            bot.send_message(
-                                dialogue.chat_id(),
-                                "Please use /plan <OPS NAME> (to see availability for a user) or /plan <date> (to see availability for a date).",
-                            ),
-                            &user.username,
-                        )
-                            .await;
-                        dialogue.update(State::Start).await?;
+                        dislpay_retry_message(bot, dialogue.chat_id(), &user.username).await;
+                        dialogue.update(State::PlanSelect).await?;
                     }
                 }
             }
         }
         Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
     }
+    
+    Ok(())
+}
 
+pub(super) async fn plan(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    ops_name_or_date: String,
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "plan", "Command", msg);
+
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(user) = msg.from {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::ErrorState).await?;
+        return Ok(());
+    };
+
+    if !ops_name_or_date.is_empty() {
+        handle_ops_name_or_date_input(&bot, &dialogue,&pool, &user, ops_name_or_date).await?;
+    } else {
+        display_enter_ops_name_or_date(&bot, dialogue.chat_id(), &user.username).await;
+        dialogue.update(State::PlanSelect).await?;
+    }
+
+    Ok(())
+}
+
+pub(super) async fn plan_select(
+    bot: Bot,
+    dialogue: MyDialogue,
+    msg: Message,
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "plan_select", "Message", msg);
+    // Early return if the message has no sender (msg.from() is None)
+    let user = if let Some(ref user) = msg.from {
+        user
+    } else {
+        log::error!("Cannot get user from message");
+        dialogue.update(State::Start).await?;
+        return Ok(());
+    };
+    
+    match msg.text().map(ToOwned::to_owned) {
+        Some(ops_name_or_date) => {
+            handle_ops_name_or_date_input(&bot, &dialogue,&pool, &user, ops_name_or_date).await?;
+        }
+        None => {
+            dislpay_retry_message(&bot, dialogue.chat_id(), &user.username).await;
+        }
+    }
+    
     Ok(())
 }
 

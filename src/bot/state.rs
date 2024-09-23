@@ -12,7 +12,7 @@ use super::register::{register, register_complete, register_name, register_ops_n
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
 use crate::bot::forecast::{forecast, forecast_view};
-use crate::bot::plan::{plan, plan_view};
+use crate::bot::plan::{plan, plan_select, plan_view};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::notify::{notify, notify_settings};
@@ -156,6 +156,7 @@ pub(super) enum State {
         end: NaiveDate
     },
     // States meant for planning SANS for flight
+    PlanSelect,
     PlanView {
         msg_id: MessageId,
         user_details: Option<Usr>,
@@ -167,6 +168,7 @@ pub(super) enum State {
     },
     // TODO: States meant for SANS attendance confirmation
     // States meant for editing users
+    UserSelect,
     UserEdit {
         msg_id: MessageId,
         user_details: Usr,
@@ -273,6 +275,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::ApplyEditOpsName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_ops_name))
             .branch(case![State::UserEditName { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_name))
             .branch(case![State::UserEditOpsName { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_ops_name))
+            .branch(case![State::PlanSelect].endpoint(plan_select))
         )
         .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
         .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))

@@ -42,7 +42,7 @@ pub(super) enum PrivilegedCommands {
     User {
         ops_name: String
     },
-    #[command(description = "Plan a user for flight, /plan <OPS NAME> or /plan <date>")]
+    #[command(description = "Plan a user for flight")]
     Plan {
         ops_name_or_date: String
     },
