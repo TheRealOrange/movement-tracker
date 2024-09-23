@@ -268,10 +268,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
 
     let message_handler = Update::filter_message()
         .branch(case![State::ErrorState].endpoint(error_state))
-        .branch(case![State::RegisterName { msg_id, role_type, user_type }].endpoint(register_name))
-        .branch(case![State::RegisterOpsName { msg_id, role_type, user_type, name }].endpoint(register_ops_name))
         .branch(command_handler)
         .branch(cancel_handler)
+        .branch(case![State::RegisterName { msg_id, role_type, user_type }].endpoint(register_name))
+        .branch(case![State::RegisterOpsName { msg_id, role_type, user_type, name }].endpoint(register_ops_name))
         .branch(dptree::filter_async(check_admin)
             .branch(admin_command_handler)
             .branch(case![State::ApplyEditName { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_name))
