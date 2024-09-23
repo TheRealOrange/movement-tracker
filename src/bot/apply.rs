@@ -12,7 +12,6 @@ use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};
-use crate::bot::user::user;
 
 // Generates the inline keyboard for applications with pagination
 fn get_applications_keyboard(

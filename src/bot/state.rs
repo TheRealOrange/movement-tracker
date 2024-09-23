@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use super::commands::{cancel, help, set_menu_buttons, Commands, PrivilegedCommands};
 use super::{send_msg, HandlerResult, MyDialogue};
 use crate::bot::apply::{apply_edit_admin, apply_edit_name, apply_edit_ops_name, apply_edit_prompt, apply_edit_role, apply_edit_type, apply_view, approve};
@@ -8,6 +9,7 @@ use teloxide::dispatching::{dialogue, UpdateHandler};
 use teloxide::dptree::{case, endpoint};
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, MessageId, ReplyParameters};
+use uuid::Uuid;
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type, user_select};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
@@ -162,6 +164,7 @@ pub(super) enum State {
         user_details: Option<Usr>,
         selected_date: Option<NaiveDate>,
         availability_list: Vec<AvailabilityDetails>,
+        changes: HashSet<Uuid>,
         role_type: RoleType,
         prefix: String,
         start: usize
@@ -295,7 +298,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
-        .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Select { msg_id }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(press_button_prompt))
@@ -322,7 +325,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_delete))
-            .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, role_type, prefix, start }].endpoint(plan_view))
+            .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(plan_view))
             .branch(case![State::Saf100Select { msg_id }].endpoint(saf100_select))
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
             .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(saf100_confirm))
