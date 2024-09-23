@@ -96,7 +96,7 @@ fn get_availability_edit_text(
     message_text
 }
 
-async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>) -> Option<MessageId> {
+async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>, msg_id: Option<MessageId>) -> Option<MessageId> {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
 
     let mut control_row: Vec<InlineKeyboardButton> = vec![InlineKeyboardButton::callback("ADD", "ADD")];
@@ -144,12 +144,8 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             ));
         }
     }
-
-    send_msg(
-        bot.send_message(chat_id, output_text)
-            .reply_markup(InlineKeyboardMarkup::new(options)),
-        username
-    ).await
+    
+    send_or_edit_msg(bot, chat_id, username, msg_id, output_text, Some(InlineKeyboardMarkup::new(options)), None).await
 }
 
 async fn update_availability_edit(
@@ -374,7 +370,7 @@ async fn handle_go_back(
         .await {
         Ok(availability_list) => {
             if availability_list.len() == 0 {
-                match display_availability_options(bot, dialogue.chat_id(), username, &availability_list).await {
+                match display_availability_options(bot, dialogue.chat_id(), username, &availability_list, msg_id).await {
                     None => {}
                     Some(msg_id) => {
                         dialogue.update(State::AvailabilityView { msg_id, availability_list }).await?;
@@ -510,7 +506,7 @@ pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, p
     match controllers::scheduling::get_upcoming_availability_by_tele_id(&pool, user.id.0)
         .await {
         Ok(availability_list) => {
-            match display_availability_options(&bot, dialogue.chat_id(), &user.username, &availability_list).await {
+            match display_availability_options(&bot, dialogue.chat_id(), &user.username, &availability_list, None).await {
                 None => {}
                 Some(msg_id) => {
                     dialogue.update(State::AvailabilityView { msg_id, availability_list }).await?
@@ -546,7 +542,6 @@ pub(super) async fn availability_view(
                 bot.send_message(dialogue.chat_id(), "Invalid option."),
                 &q.from.username,
             ).await;
-            display_availability_options(&bot, dialogue.chat_id(), &q.from.username, &availability_list).await;
         }
         Some(option) => {
             // Generate random prefix to make the IDs only applicable to this dialogue instance

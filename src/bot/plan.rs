@@ -36,8 +36,8 @@ fn get_user_availability_keyboard(
         .map(|entry| {
             // Check if the availability ID is in the changes vector
             let is_in_changes = changes.contains(&entry.id);
-            let option_str = if entry.planned {
-                if entry.is_valid ^ is_in_changes { "UNPLAN" } else { "UNPLAN (UNAVAIL)" }
+            let option_str = if entry.planned ^ is_in_changes {
+                if entry.is_valid { "UNPLAN" } else { "UNPLAN (UNAVAIL)" }
             } else {
                 "PLAN"
             };
@@ -103,8 +103,8 @@ fn get_date_availability_keyboard(
         .map(|entry| {
             // Check if the availability ID is in the changes vector
             let is_in_changes = changes.contains(&entry.id);
-            let option_str = if entry.planned {
-                if entry.is_valid ^ is_in_changes { "UNPLAN" } else { "UNPLAN *(UNAVAIL)*" }
+            let option_str = if entry.planned ^ is_in_changes {
+                if entry.is_valid { "UNPLAN" } else { "UNPLAN (UNAVAIL)" }
             } else {
                 "PLAN"
             };
@@ -170,9 +170,9 @@ fn get_planned_change_text(availability: &AvailabilityDetails, changes: &HashSet
     let planned_str = if is_in_changes {
         // If the ID is in the changes, toggle the planned state for display
         if availability.planned {
-            " PLANNED \\-\\> UNPLANNED"
+            " PLANNED ➡️ UNPLANNED"
         } else {
-            " UNPLANNED \\-\\> PLANNED"
+            " UNPLANNED ➡️ PLANNED"
         }
     } else {
         // If no changes, display the actual planned state
@@ -200,7 +200,7 @@ fn get_user_availability_text(
         ).as_str());
         
         for availability in database_list {
-            let date_str = availability.avail.format("%b %d, %Y").to_string();
+            let date_str = utils::escape_special_characters(&availability.avail.format("%d %b, %Y").to_string());
             let ict_type_str = availability.ict_type.as_ref();
 
             // Determine the current and toggled planned states
@@ -223,7 +223,7 @@ fn get_user_availability_text(
             };
 
             message.push_str(&format!(
-                "\\- {} __{}__:\n{}{}\n{}{}\n",
+                "\\- {} __{}__\n{}{}\n{}{}\n",
                 date_str,
                 ict_type_str,
                 avail_str,
@@ -243,15 +243,15 @@ fn get_date_availability_text(
     database_list: &Vec<AvailabilityDetails>,
     changes: &HashSet<Uuid>
 ) -> String {
-    let date_str = selected_date.format("%b %d, %Y").to_string();
+    let date_str = utils::escape_special_characters(&selected_date.format("%d %b, %Y").to_string());
     let mut message = String::new();
 
     if database_list.is_empty() {
-        message.push_str("No users available on this date\\.\n");
+        message.push_str(format!("No users available on this date: {}\n", date_str).as_str());
     } else {
         message.push_str(format!(
             "Users available on {}:\n",
-            utils::escape_special_characters(&date_str)
+            date_str
         ).as_str());
         
         for availability in database_list {
@@ -278,7 +278,7 @@ fn get_date_availability_text(
             };
 
             message.push_str(&format!(
-                "\\- {}{} __{}__:\n{}{}\n{}{}\n",
+                "\\- {}{} __{}__\n{}{}\n{}{}\n",
                 availability.ops_name, usrtype_str,
                 ict_type_str,
                 avail_str,
