@@ -3,20 +3,20 @@ START TRANSACTION;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 DO $$ BEGIN
-    CREATE TYPE user_type_enum AS ENUM ('staff', 'ns', 'active');
+CREATE TYPE user_type_enum AS ENUM ('staff', 'ns', 'active');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
-    CREATE TYPE role_type_enum AS ENUM ('pilot', 'aro');
+CREATE TYPE role_type_enum AS ENUM ('pilot', 'aro');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$ LANGUAGE plpgsql;
 
 
 DO $$ BEGIN
-    CREATE TYPE ict_enum AS ENUM ('live', 'sims', 'other');
+CREATE TYPE ict_enum AS ENUM ('live', 'sims', 'other');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$ LANGUAGE plpgsql;
@@ -26,7 +26,7 @@ CREATE OR REPLACE FUNCTION trigger_set_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated = NOW();
-    RETURN NEW;
+RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -43,22 +43,22 @@ CREATE TABLE IF NOT EXISTS usrs (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 DROP TRIGGER IF EXISTS users_update
 ON usrs;
 CREATE TRIGGER users_update
-BEFORE UPDATE ON usrs
-FOR EACH ROW
-EXECUTE PROCEDURE trigger_set_timestamp();
+    BEFORE UPDATE ON usrs
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
     -- Ensure there is only one (tele_id, is_valid = true) in the usrs table
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_tele_id_unique_valid
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_tele_id_unique_valid
     ON usrs (tele_id)
     WHERE is_valid = TRUE;
-    -- Ensure there is only one (ops_name, is_valid = true) in the usrs table
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_ops_name_unique_valid
+-- Ensure there is only one (ops_name, is_valid = true) in the usrs table
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usrs_ops_name_unique_valid
     ON usrs (ops_name)
     WHERE is_valid = TRUE;
 END $$ LANGUAGE plpgsql;
@@ -76,22 +76,22 @@ CREATE TABLE IF NOT EXISTS apply (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 DROP TRIGGER IF EXISTS apply_update
 ON apply;
 CREATE TRIGGER apply_update
-BEFORE UPDATE ON apply
-FOR EACH ROW
-EXECUTE PROCEDURE trigger_set_timestamp();
+    BEFORE UPDATE ON apply
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
     -- Ensure there is only one (tele_id, is_valid = true) in the apply table
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_tele_id_unique_valid
+CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_tele_id_unique_valid
     ON apply (tele_id)
     WHERE is_valid = TRUE;
-    -- Ensure there is only one (ops_name, is_valid = true) in the usrs table
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_ops_name_unique_valid
+-- Ensure there is only one (ops_name, is_valid = true) in the usrs table
+CREATE UNIQUE INDEX IF NOT EXISTS idx_apply_ops_name_unique_valid
     ON apply (ops_name)
     WHERE is_valid = TRUE;
 END $$ LANGUAGE plpgsql;
@@ -110,14 +110,14 @@ CREATE TABLE IF NOT EXISTS availability (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_availability_usr_date ON availability (usr_id, avail);
 DROP TRIGGER IF EXISTS availability_update
 ON availability;
 CREATE TRIGGER availability_update
-BEFORE UPDATE ON availability
-FOR EACH ROW
-EXECUTE PROCEDURE trigger_set_timestamp();
+    BEFORE UPDATE ON availability
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
 
@@ -134,14 +134,14 @@ CREATE TABLE IF NOT EXISTS movement (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_movement_usr_date ON movement (usr_id, avail);
 DROP TRIGGER IF EXISTS movement_update
 ON movement;
 CREATE TRIGGER movement_update
-BEFORE UPDATE ON movement
-FOR EACH ROW
-EXECUTE PROCEDURE trigger_set_timestamp();
+    BEFORE UPDATE ON movement
+    FOR EACH ROW
+    EXECUTE PROCEDURE trigger_set_timestamp();
 END $$ LANGUAGE plpgsql;
 
 DO $$ BEGIN
@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS scheduled_notifications  (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 DROP TRIGGER IF EXISTS scheduled_notifications_update
 ON scheduled_notifications;
 CREATE TRIGGER scheduled_notifications_update
@@ -174,7 +174,7 @@ CREATE TABLE IF NOT EXISTS notification_settings   (
     created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     is_valid BOOLEAN NOT NULL DEFAULT TRUE
-);
+    );
 DROP TRIGGER IF EXISTS notification_settings_update
 ON notification_settings;
 CREATE TRIGGER notification_settings_update
@@ -199,13 +199,6 @@ RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
--- Run trigger whenever the admin column of user data is edited
-CREATE TRIGGER trigger_disable_notifications
-    AFTER UPDATE OF admin ON usrs
-    FOR EACH ROW
-    WHEN (OLD.admin IS DISTINCT FROM NEW.admin)
-EXECUTE PROCEDURE disable_notifications_on_admin_change();
-
 -- Trigger function to disable the notifications if a user removed
 CREATE OR REPLACE FUNCTION disable_notifications_on_is_valid_change()
 RETURNS TRIGGER AS $$
@@ -222,7 +215,18 @@ RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
+-- Run trigger whenever the admin column of user data is edited
+DROP TRIGGER IF EXISTS trigger_disable_notifications_admin_change
+ON usrs;
+CREATE TRIGGER trigger_disable_notifications_admin_change
+    AFTER UPDATE OF admin ON usrs
+    FOR EACH ROW
+    WHEN (OLD.admin IS DISTINCT FROM NEW.admin)
+EXECUTE PROCEDURE disable_notifications_on_is_valid_change();
+
 -- Run trigger whenever the is_valid column of user data is edited
+DROP TRIGGER IF EXISTS trigger_disable_notifications_on_is_valid_change
+ON usrs;
 CREATE TRIGGER trigger_disable_notifications_on_is_valid_change
     AFTER UPDATE OF is_valid ON usrs
     FOR EACH ROW
