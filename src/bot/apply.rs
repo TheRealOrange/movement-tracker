@@ -1,7 +1,7 @@
 use crate::bot::state::State;
-use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::types::{Apply, RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::types::Uuid;
@@ -11,7 +11,7 @@ use std::str::FromStr;
 use chrono::Local;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};
 
 // Generates the inline keyboard for applications with pagination
 fn get_applications_keyboard(
@@ -94,32 +94,7 @@ async fn display_applications(
     let message_text = get_applications_text(start, slice_end, total);
 
     // Send or edit the message
-    match msg_id {
-        Some(id) => {
-            // Edit the existing message
-            match bot.edit_message_text(chat_id, id, message_text.clone())
-                .reply_markup(markup.clone())
-                .await {
-                Ok(edit_msg) => Ok(Some(edit_msg.id)),
-                Err(e) => {
-                    log::error!("Failed to edit message: {}", e);
-                    Ok(send_msg(
-                        bot.send_message(chat_id, message_text)
-                            .reply_markup(markup),
-                        username
-                    ).await)
-                }
-            }
-        }
-        None => {
-            // Send a new message
-            Ok(send_msg(
-                bot.send_message(chat_id, message_text)
-                    .reply_markup(markup),
-                username
-            ).await)
-        }
-    }
+    Ok(send_or_edit_msg(&bot, chat_id, username, msg_id, message_text, Some(markup), None).await)
 }
 
 // Handles re-showing options during pagination
@@ -158,15 +133,15 @@ async fn handle_re_show_options(
 }
 
 fn get_application_edit_text(application: &Apply, admin: bool) -> String {
-    format!("Details of application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nSUBMITTED: {}\nUSERNAME: {}\nIS ADMIN: {}\n\nUpdated: {}\nDo you wish to edit any entries?",
+    format!("Details of application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nSUBMITTED: _{}_\nUSERNAME: {}\n\nUpdated: _{}_\nDo you wish to edit any entries?",
             application.name,
             application.ops_name,
             application.role_type.as_ref(),
             application.usr_type.as_ref(),
-            application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-            application.chat_username,
             if admin == true { "YES" } else { "NO" },
-            Local::now().format("%d%m %H%M.%S").to_string()
+            utils::escape_special_characters(&application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+            format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64),
+            utils::escape_special_characters(&Local::now().format("%d%m %H%M.%S").to_string())
     )
 }
 
@@ -187,33 +162,9 @@ async fn display_application_edit_prompt(
         .map(|option| InlineKeyboardButton::callback(option, option))
         .collect();
     options.push(confirm);
-
-    let cloned_keyboard = options.clone();
-
-    let send_new_msg = || async {
-        send_msg(
-            bot.send_message(
-                chat_id,
-                get_application_edit_text(&application, admin)
-            ).reply_markup(InlineKeyboardMarkup::new(cloned_keyboard)),
-            username
-        ).await
-    };
-
-    match edit_id {
-        None => {
-            send_new_msg().await
-        }
-        Some(msg_id) => {
-            match bot.edit_message_text(
-                chat_id, msg_id,
-                get_application_edit_text(&application, admin)
-            ).reply_markup(InlineKeyboardMarkup::new(options)).await {
-                Ok(edited_msg) => Some(edited_msg.id),
-                Err(_) => send_new_msg().await
-            }
-        }
-    }
+    
+    // Send or edit message
+    send_or_edit_msg(bot, chat_id, username, edit_id, get_application_edit_text(&application, admin), Some(InlineKeyboardMarkup::new(options)), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
@@ -438,6 +389,32 @@ pub(super) async fn apply_edit_prompt(
                             .await
                         {
                             Ok(user) => {
+                                // Emit system notification to indicate who has approved the user
+                                
+                                // Fetch the user's chat info dynamically using getChat
+                                let user_chat = bot.get_chat(ChatId(user.tele_id)).await;
+                                let has_username = match user_chat {
+                                    Ok(chat) => {
+                                        if let Some(username) = chat.username() {
+                                            // If username exists, mention with username and link
+                                            format!("\nUSERNAME: @{}", utils::escape_special_characters(&username))
+                                        } else { "".into() }
+                                    },
+                                    Err(_) => { "" .into() }
+                                };
+                                notifier::emit::system_notifications(
+                                    &bot,
+                                    format!(
+                                        "{} has approved the application:\nOPS NAME: `{}`\nNAME: *{}*{}",
+                                        utils::username_link_tag(&q.from),
+                                        user.ops_name,
+                                        format!("[{}](tg://user?id={})", user.name, user.tele_id as u64),
+                                        has_username
+                                    ).as_str(),
+                                    &pool,
+                                    q.from.id.0 as i64
+                                ).await;
+                                
                                 // If the user is an admin, configure default notification settings
                                 if admin {
                                     // Set default notification settings
@@ -471,28 +448,17 @@ pub(super) async fn apply_edit_prompt(
                                     ).await;
                                 }
                                 
-                                match bot.edit_message_text(
-                                    dialogue.chat_id(), msg_id,
-                                    format!("Approved application:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\nADDED: {}\nUSERNAME: {}\nIS ADMIN: {}",
-                                            &user.name,
-                                            &user.ops_name,
-                                            user.role_type.as_ref(),
-                                            user.usr_type.as_ref(),
-                                            &user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string(),
-                                            &application.chat_username,
-                                            if admin == true { "YES" } else { "NO" },
-                                    )
-                                ).await {
-                                    Ok(_) => {}
-                                    Err(e) => {
-                                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                                        log::error!("Error editing message ({}): {}", msg_id, e);
-                                        send_msg(
-                                            bot.send_message(dialogue.chat_id(), "Approved."),
-                                            &q.from.username,
-                                        ).await;
-                                    }
-                                };
+                                let message_text = format!(
+                                    "Approved application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUSERNAME: {}", utils::escape_special_characters(&user.name),
+                                    utils::escape_special_characters(&user.ops_name),
+                                    user.role_type.as_ref(),
+                                    user.usr_type.as_ref(),
+                                    if admin == true { "YES" } else { "NO" },
+                                    utils::escape_special_characters(&user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+                                    format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64)
+                                );
+                                // Send or edit message
+                                send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
                                 
                                 dialogue.update(State::Start).await?;
                             }
@@ -524,7 +490,7 @@ pub(super) async fn apply_edit_prompt(
                 match controllers::apply::remove_apply_by_uuid(&pool, application.id).await {
                     Ok(success) => {
                         send_msg(
-                            bot.send_message(dialogue.chat_id(), if success { "Application rejected." } else { "Error occured" }),
+                            bot.send_message(dialogue.chat_id(), if success { "Application rejected." } else { "Error occurred" }),
                             &q.from.username,
                         ).await;
                         dialogue.update(State::Start).await?

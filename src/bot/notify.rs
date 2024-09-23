@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
-use crate::bot::{handle_error, log_try_remove_markup, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State;
 use crate::types::NotificationSettings;
@@ -72,28 +72,16 @@ async fn display_dm_config_notification(bot: &Bot, chat_id: ChatId, username: &O
     ).await
 }
 
-async fn update_dm_config_notification(bot: &Bot, chat_id: ChatId, message_id: &MessageId, username: &Option<String>, notification_settings: &NotificationSettings, prefix: &String) {
+async fn update_dm_config_notification(bot: &Bot, chat_id: ChatId, message_id: &MessageId, username: &Option<String>, notification_settings: &NotificationSettings, prefix: &String) -> Option<MessageId> {
     let message_text = format!(
         "Configure the notification settings for the chat:\n{}",
         format_notification_settings(&notification_settings)
     );
 
     let keyboard = create_inline_keyboard(&notification_settings, prefix);
-
-    // Edit both text and reply markup in one call
-    match bot.edit_message_text(chat_id, *message_id, message_text.as_str())
-        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-        .reply_markup(keyboard)
-        .await {
-        Ok(_) => {}
-        Err(e) => {
-            log::error!(
-                "Error editing msg in response to user: {}, error: {}",
-                username.as_deref().unwrap_or("none"),
-                e
-            );
-        }
-    };
+    
+    // Send or edit message
+    send_or_edit_msg(bot, chat_id, username, Some(*message_id), message_text, Some(keyboard), Some(ParseMode::MarkdownV2)).await
 }
 
 pub(super) async fn notify(
@@ -213,22 +201,12 @@ pub(super) async fn notify_settings(
                             Some(notification_settings.notif_conflict)
                         ).await {
                             Ok(settings) => {
-                                match bot.edit_message_text(dialogue.chat_id(), msg_id, format!(
+                                let message_text = format!(
                                     "Updated notification settings for chat:\n{}",
                                     format_notification_settings(&settings)
-                                )).parse_mode(teloxide::types::ParseMode::MarkdownV2).await {
-                                    Ok(_) => {}
-                                    Err(_) => {
-                                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                                        send_msg(
-                                            bot.send_message(dialogue.chat_id(), format!(
-                                                "Updated notification settings for chat:\n{}",
-                                                format_notification_settings(&settings)
-                                            )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
-                                            &q.from.username,
-                                        ).await;
-                                    }
-                                };
+                                );
+                                // Send or edit message
+                                send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
                                 
                                 if dialogue.chat_id() != chat_id {
                                     send_msg(
@@ -236,7 +214,7 @@ pub(super) async fn notify_settings(
                                             "{} has updated notification settings for chat:\n{}",
                                             utils::username_link_tag(&q.from),
                                             format_notification_settings(&settings)
-                                        )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                                        )).parse_mode(ParseMode::MarkdownV2),
                                         &q.from.username,
                                     ).await;
                                 }
@@ -257,7 +235,7 @@ pub(super) async fn notify_settings(
                                 bot.send_message(chat_id, format!(
                                     "{} has aborted updating notifications",
                                     utils::username_link_tag(&q.from)  // Use first name and user ID if no username
-                                )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                                )).parse_mode(ParseMode::MarkdownV2),
                                 &q.from.username,
                             ).await;
                         }
@@ -303,8 +281,10 @@ pub(super) async fn notify_settings(
                         return Ok(());
                     }
 
-                    update_dm_config_notification(&bot, dialogue.chat_id(), &msg_id, &q.from.username, &notification_settings, &prefix).await;
-                    dialogue.update(State::NotifySettings { notification_settings, chat_id, prefix, msg_id }).await?;
+                    match update_dm_config_notification(&bot, dialogue.chat_id(), &msg_id, &q.from.username, &notification_settings, &prefix).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => dialogue.update(State::NotifySettings { notification_settings, chat_id, prefix, msg_id: new_msg_id }).await?
+                    }
                 }
             }
         }

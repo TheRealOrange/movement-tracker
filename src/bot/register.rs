@@ -1,4 +1,4 @@
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use std::str::FromStr;
 use strum::IntoEnumIterator;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ReplyParameters};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};
 
 async fn display_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
     let roles = RoleType::iter()
@@ -50,12 +50,13 @@ async fn display_register_confirmation(bot: &Bot, chat_id: ChatId, username: &Op
 
     send_msg(
         bot.send_message(chat_id, format!(
-            "You are registering with the following details:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\n\nConfirm registration?",
-            name,
-            ops_name,
+            "You are registering with the following details:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\n\nConfirm registration?",
+            utils::escape_special_characters(&name),
+            utils::escape_special_characters(&ops_name),
             role_type.as_ref(),
             user_type.as_ref()
-        )).reply_markup(InlineKeyboardMarkup::new([confirm])),
+        )).reply_markup(InlineKeyboardMarkup::new([confirm]))
+            .parse_mode(ParseMode::MarkdownV2),
         username
     ).await
 }
@@ -147,7 +148,7 @@ pub(super) async fn register_role(
                     log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                     log::debug!("Selected role: {:?}", role_enum);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Selected role: {}", role_enum.as_ref())),
+                        bot.send_message(dialogue.chat_id(), format!("Selected role: `{}`", role_enum.as_ref())).parse_mode(ParseMode::MarkdownV2),
                         &q.from.username,
                     ).await;
 
@@ -204,7 +205,7 @@ pub(super) async fn register_type(
                     log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                     log::debug!("Selected user type: {:?}", user_type_enum);
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Selected user type: {}", user_type_enum.as_ref())),
+                        bot.send_message(dialogue.chat_id(), format!("Selected user type: `{}`", user_type_enum.as_ref())).parse_mode(ParseMode::MarkdownV2),
                         &q.from.username,
                     ).await;
                     match display_register_name(&bot, dialogue.chat_id(), &q.from.username).await {
@@ -406,38 +407,22 @@ pub(super) async fn register_complete(
                         notifier::emit::register_notifications(
                             &bot,
                             format!(
-                                "User {} has applied:\nOPS NAME: {}\nNAME: {}",
+                                "User {} has applied:\nOPS NAME: `{}`\nNAME: *{}*",
                                 utils::username_link_tag(&q.from),
-                                ops_name,
-                                name
+                                utils::escape_special_characters(&ops_name), utils::escape_special_characters(&name)
                             ).as_str(),
                             &pool,
                         ).await;
-
-                        match bot.edit_message_text(dialogue.chat_id(), msg_id,
-                            format!(
-                                "Submitted registration with the following details:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\n\nPlease wait for approval.?",
-                                name,
-                                ops_name,
-                                role_type.as_ref(),
-                                user_type.as_ref()
-                            )
-                        ).await {
-                            Ok(_) => {}
-                            Err(_) => {
-                                log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), format!(
-                                        "Submitted registration with the following details:\nNAME: {}\nOPS NAME: {}\nROLE: {}\nTYPE: {}\n\nPlease wait for approval.?",
-                                        name,
-                                        ops_name,
-                                        role_type.as_ref(),
-                                        user_type.as_ref()
-                                    )),
-                                    &q.from.username,
-                                ).await;
-                            }
-                        }
+                        
+                        let registration_text_str = format!(
+                            "Submitted registration with the following details:\nROLE: `{}`\nTYPE: `{}`\nNAME: *{}*\nOPS NAME: `{}`\n\nPlease wait for approval.",
+                            role_type.as_ref(),
+                            user_type.as_ref(),
+                            utils::escape_special_characters(&name), utils::escape_special_characters(&ops_name)
+                        );
+                        
+                        // Send or edit message
+                        send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), registration_text_str, None, Some(ParseMode::MarkdownV2)).await;
                         dialogue.update(State::Start).await?;
                     },
                     Ok(false) => {

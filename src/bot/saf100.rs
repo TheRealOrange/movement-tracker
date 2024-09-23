@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
 use sqlx::types::Uuid;
-use crate::bot::{handle_error, send_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::types::{Availability, AvailabilityDetails};
@@ -233,13 +233,7 @@ pub(super) async fn saf100_select(
                 Ok(availability_list) => {
                     if availability_list.is_empty() {
                         // No entries found
-                        match bot.edit_message_text(dialogue.chat_id(), msg_id, "No availability entries found.").await {
-                            Ok(_) => {}
-                            Err(_) => {
-                                // Failed to edit the message; consider sending a new one or logging
-                                log::error!("Failed to edit message to show no entries.");
-                            }
-                        };
+                        send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "No availability entries found.".into(), None, None).await;
                         dialogue.update(State::Start).await?;
                         return Ok(());
                     }
@@ -270,37 +264,21 @@ pub(super) async fn saf100_select(
                     // Generate the message text
                     let message_text = get_paginated_text(&availability_list, start, show, &action);
 
-                    // Edit the original message with new text and keyboard
-                    match bot.edit_message_text(dialogue.chat_id(), msg_id, message_text)
-                        .reply_markup(paginated_keyboard).await {
-                        Ok(_) => {
+                    // Edit the original message with new text and keyboard, or send a new one
+                    match send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, Some(paginated_keyboard), None).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => {
                             // Update the dialogue state to Saf100View with necessary context
-                            dialogue.update(State::Saf100View { msg_id, availability_list, prefix, start, action }).await?;
+                            dialogue.update(State::Saf100View { msg_id: new_msg_id, availability_list, prefix, start, action }).await?
                         }
-                        Err(e) => {
-                            log::error!("Failed to edit saf100 message: {}", e);
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), "Failed to update availability view."),
-                                &q.from.username,
-                            ).await;
-                            dialogue.update(State::ErrorState).await?;
-                        }
-                    };
+                    }
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
         "SAF100_CANCEL" => {
             // Handle cancellation by reverting to the start state
-            match bot.edit_message_text(dialogue.chat_id(), msg_id, "Operation cancelled.").await {
-                Ok(_) => {}
-                Err(e) => {
-                    // Failed to edit the message; consider sending a new one or logging
-                    log::error!("Failed to edit saf100 message on cancel: {}", e);
-                    dialogue.update(State::ErrorState).await?;
-                }
-            };
-            
+            send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation cancelled.".into(), None, None).await;
             dialogue.update(State::Start).await?;
         }
         _ => {
@@ -365,14 +343,8 @@ pub(super) async fn saf100_view(
             handle_re_show_options(&bot, &dialogue, prefix, availability_list, new_start, show, action, msg_id, &q.from.username).await?;
         }
         "DONE" => {
-            match bot.edit_message_text(dialogue.chat_id(), msg_id, "Operation completed.")
-                .await {
-                Ok(_) => dialogue.update(State::Start).await?,
-                Err(e) => {
-                    log::error!("Failed to edit saf100 message on DONE: {}", e);
-                    dialogue.update(State::ErrorState).await?
-                }
-            };
+            send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation completed.".into(), None, None).await;
+            dialogue.update(State::Start).await?
         }
         _ => {
             // Handle selection of an availability entry
@@ -391,21 +363,11 @@ pub(super) async fn saf100_view(
                                     availability_entry.remarks.as_deref().unwrap_or("None")
                                 );
 
-                                match bot.edit_message_text(dialogue.chat_id(), msg_id, details_text)
-                                    .reply_markup(get_confirmation_keyboard())
-                                    .await {
-                                    Ok(_) => {
-                                        dialogue.update(State::Saf100Confirm { msg_id, availability: availability_entry, availability_list, prefix, start, action }).await?
-                                    },
-                                    Err(e) => {
-                                        log::error!("Failed to edit saf100 message with details: {}", e);
-                                        send_msg(
-                                            bot.send_message(dialogue.chat_id(), "Failed to display availability details."),
-                                            &q.from.username,
-                                        ).await;
-                                        dialogue.update(State::ErrorState).await?
-                                    }
-                                };
+                                // Send or edit message
+                                match send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), details_text, Some(get_confirmation_keyboard()), None).await {
+                                    None => dialogue.update(State::ErrorState).await?,
+                                    Some(new_msg_id) => dialogue.update(State::Saf100Confirm { msg_id: new_msg_id, availability: availability_entry, availability_list, prefix, start, action }).await?
+                                }
                             }
                             Err(e) => {
                                 log::error!("Error fetching availability by UUID: {}", e);
@@ -480,7 +442,7 @@ pub(super) async fn saf100_confirm(
         "YES" => {
             match controllers::attendance::set_saf100_true_by_uuid(&pool, availability.id).await {
                 Ok(details) => {
-                    notifier::emit::system_notifications(
+                    notifier::emit::plan_notifications(
                         &bot,
                         format!(
                             "{} has confirmed SAF100 issued for {} on {}",
@@ -492,19 +454,10 @@ pub(super) async fn saf100_confirm(
                         q.from.id.0 as i64
                     ).await;
                     
-                    match bot.edit_message_text(
-                        dialogue.chat_id(), msg_id, 
-                        format!("SAF100 confirmed issued for {} on {}", details.ops_name, details.avail.format("%Y-%m-%d"))
-                    ).await {
-                        Ok(_) => {},
-                        Err(e) => {
-                            log::error!("Failed to edit saf100 message with details: {}", e);
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), "Updated"),
-                                &q.from.username,
-                            ).await;
-                        }
-                    };
+                    let message_text = format!("SAF100 confirmed issued for {} on {}", details.ops_name, details.avail.format("%Y-%m-%d"));
+                    // Send or edit message
+                    send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, None).await;
+                    
                     dialogue.update(State::Start).await?;
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await,

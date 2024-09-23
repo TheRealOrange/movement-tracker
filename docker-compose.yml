@@ -11,7 +11,6 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWD}
     volumes:
       - database_data:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     ports:
       - "127.0.0.1:${POSTGRES_PORT}:5432"
     healthcheck:
@@ -51,12 +50,13 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && movement-tracker"
+    command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && /app/movement-tracker"
+    restart: always
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 2s
+      timeout: 3s
+      retries: 2
 
 volumes:
   database_data:

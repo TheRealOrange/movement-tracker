@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use crate::types::{Availability, AvailabilityDetails, Ict, RoleType};
 use chrono::Local;
 use sqlx::types::chrono::NaiveDate;
@@ -591,7 +591,7 @@ pub(crate) async fn get_furthest_avail_date_for_role(
 
 pub(crate) async fn get_users_available_by_role_on_date(
     conn: &PgPool,
-    date: NaiveDate,
+    date: &NaiveDate,
     role_type: &RoleType,
 ) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
     let result = sqlx::query_as!(
@@ -645,99 +645,100 @@ pub(crate) async fn get_users_available_by_role_on_date(
     }
 }
 
-pub(crate) async fn toggle_planned_status(
+pub(crate) async fn toggle_planned_status_multiple(
     conn: &PgPool,
-    availability_id: Uuid,
-) -> Result<AvailabilityDetails, sqlx::Error> {
-    let result = sqlx::query_as!(
-        AvailabilityDetails,
-        r#"
-        WITH update_statement AS (
-            UPDATE availability
-            SET planned = NOT planned
-            WHERE id = $1
-            RETURNING *
-        ),
-        notification_handling AS (
-            SELECT
-                update_statement.planned AS new_planned,
-                update_statement.id AS availability_id,
-                update_statement.avail AS avail_date
-            FROM update_statement
-        ),
-        invalidate_notifications AS (
-            UPDATE scheduled_notifications
-            SET is_valid = FALSE
-            WHERE avail_id = (SELECT availability_id FROM notification_handling)
-              AND sent = FALSE
-              AND (SELECT new_planned FROM notification_handling) = FALSE
-            RETURNING id
-        ),
-        schedule_notifications AS (
-            INSERT INTO scheduled_notifications (avail_id, scheduled_time)
-            SELECT
-                (SELECT availability_id FROM notification_handling),
-                times.scheduled_time
-            FROM (
-                -- Immediate Notification
-                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
-                UNION ALL
-                -- 5 Days Prior Notification (only if at least 5 days remain)
-                SELECT
-                    (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '09 hours'
-                    - INTERVAL '5 days' AS scheduled_time
-                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5
-                UNION ALL
-                -- 2 Days Prior Notification (only if at least 2 days remain)
-                SELECT
-                    (SELECT avail_date FROM notification_handling)::timestamp
-                    + INTERVAL '09 hours'
-                    - INTERVAL '2 days' AS scheduled_time
-                WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2
-            ) AS times
-            WHERE (SELECT new_planned FROM notification_handling) = TRUE
-            RETURNING id
-        )
-        SELECT
-            update_statement.id,
-            usrs.ops_name,
-            usrs.usr_type AS "usr_type: _",
-            update_statement.avail,
-            update_statement.ict_type AS "ict_type: _",
-            update_statement.remarks,
-            update_statement.planned,
-            update_statement.saf100,
-            update_statement.attended,
-            update_statement.is_valid,
-            update_statement.created,
-            update_statement.updated
-        FROM update_statement
-        JOIN usrs ON update_statement.usr_id = usrs.id;
-        "#,
-        availability_id
-    )
-        .fetch_one(conn)
-        .await;
+    availability_ids: HashSet<Uuid>,
+) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
+    // Start a transaction
+    let mut tx = conn.begin().await?;
 
-    match result {
-        Ok(res) => {
-            log::info!(
-                "Toggled planned status for availability with UUID: {}. New planned status: {}",
-                availability_id,
-                res.planned
-            );
-            Ok(res)
-        }
-        Err(e) => {
-            log::error!(
-                "Error toggling planned status for availability with UUID {}: {}",
-                availability_id,
-                e
-            );
-            Err(e)
+    let mut updated_availabilities = Vec::new();
+
+    // Loop through each availability ID and toggle the planned status
+    for availability_id in availability_ids {
+        let result = sqlx::query_as!(
+            AvailabilityDetails,
+            r#"
+            WITH update_statement AS (
+                UPDATE availability
+                SET planned = NOT planned
+                WHERE id = $1
+                RETURNING *
+            ),
+            notification_handling AS (
+                SELECT
+                    update_statement.planned AS new_planned,
+                    update_statement.id AS availability_id,
+                    update_statement.avail AS avail_date
+                FROM update_statement
+            ),
+            invalidate_notifications AS (
+                UPDATE scheduled_notifications
+                SET is_valid = FALSE
+                WHERE avail_id = (SELECT availability_id FROM notification_handling)
+                  AND sent = FALSE
+                  AND (SELECT new_planned FROM notification_handling) = FALSE
+                RETURNING id
+            ),
+            schedule_notifications AS (
+                INSERT INTO scheduled_notifications (avail_id, scheduled_time)
+                SELECT
+                    (SELECT availability_id FROM notification_handling),
+                    times.scheduled_time
+                FROM (
+                    -- Immediate Notification
+                    SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
+                    UNION ALL
+                    -- 5 Days Prior Notification
+                    SELECT
+                        (SELECT avail_date FROM notification_handling)::timestamp
+                        + INTERVAL '09 hours'
+                        - INTERVAL '5 days' AS scheduled_time
+                    WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 5
+                    UNION ALL
+                    -- 2 Days Prior Notification
+                    SELECT
+                        (SELECT avail_date FROM notification_handling)::timestamp
+                        + INTERVAL '09 hours'
+                        - INTERVAL '2 days' AS scheduled_time
+                    WHERE (SELECT avail_date FROM notification_handling) - CURRENT_DATE >= 2
+                ) AS times
+                WHERE (SELECT new_planned FROM notification_handling) = TRUE
+                RETURNING id
+            )
+            SELECT
+                update_statement.id,
+                usrs.ops_name,
+                usrs.usr_type AS "usr_type: _",
+                update_statement.avail,
+                update_statement.ict_type AS "ict_type: _",
+                update_statement.remarks,
+                update_statement.planned,
+                update_statement.saf100,
+                update_statement.attended,
+                update_statement.is_valid,
+                update_statement.created,
+                update_statement.updated
+            FROM update_statement
+            JOIN usrs ON update_statement.usr_id = usrs.id;
+            "#,
+            availability_id
+        ).fetch_one(&mut *tx)
+            .await;
+
+        match result {
+            Ok(availability) => updated_availabilities.push(availability),
+            Err(e) => {
+                log::error!("Error toggling planned status for availability ID {}: {}", availability_id, e);
+                tx.rollback().await?;
+                return Err(e);
+            }
         }
     }
+
+    // Commit the transaction if all updates succeed
+    tx.commit().await?;
+    Ok(updated_availabilities)
 }
 
 pub(crate) async fn get_planned_availability_details_by_tele_id(

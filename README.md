@@ -10,7 +10,18 @@ Ensure you have the following installed:
 - [Docker Compose](https://docs.docker.com/compose/)
 - Rust toolchain (`cargo`) for local development
 
-## Getting Started
+## How to use
+
+The docker image is available at
+
+```
+ghcr.io/therealorange/movement-tracker:release
+```
+Specify the prerequisite environment variables in order to use this application (you must have a PostgreSQL database up!). 
+Refer to the `docker-compose.yml` file for an example of how one may run the application with a database in a Compose stack. 
+(be sure to replace the `build:` directive with the `image:` directive)
+
+## Building
 
 ### 1. Clone the repository
 
@@ -52,10 +63,11 @@ Make sure you replace the `TELOXIDE_TOKEN` and `DEFAULT_TELEGRAM_ID` with valid 
 
 ### 3. Prepare the SQLx Query Cache
 
-The `init.sql` script will initialize your PostgreSQL database with the necessary schema and tables. Ensure that `init.sql` is present in the root directory.
+Using `sqlx migrate run` will initialize your PostgreSQL database with the necessary schema and tables. Ensure that `./migrations` is present in the root directory.
 Assuming you do not have a database up, run
 ```bash
-docker compose up -d db # this starts the postgres database AND initializes it using init.sql
+docker compose up -d db # this starts the postgres database
+sqlx migrate run # This runs all the necessary database migrations and prepares the database
 cargo sqlx prepare # this prepares the offline query cache
 ```
 You are now ready to build the application

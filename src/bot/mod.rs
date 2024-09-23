@@ -7,7 +7,7 @@ use teloxide::payloads::SendMessage;
 use teloxide::prelude::*;
 use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
-use teloxide::types::MessageId;
+use teloxide::types::{InlineKeyboardMarkup, MessageId, ParseMode};
 use crate::{controllers, utils};
 
 pub(self) mod commands;
@@ -48,6 +48,50 @@ pub(self) async fn send_msg(msg: JsonRequest<SendMessage>, username: &Option<Str
                 e
             );
             None
+        }
+    }
+}
+
+pub(self) async fn send_or_edit_msg(bot: &Bot, chat_id: ChatId, username: &Option<String>, msg_id: Option<MessageId>, message_text: String, markup_input: Option<InlineKeyboardMarkup>, parse_mode_input: Option<ParseMode>) -> Option<MessageId> {
+    // Send or edit the message
+    match msg_id {
+        Some(id) => {
+            // Edit the existing message
+            let mut bot_msg = bot.edit_message_text(chat_id, id, &message_text);
+            if let Some(markup) = markup_input.clone() {
+                bot_msg = bot_msg.reply_markup(markup);
+            }
+            if let Some(mode) = parse_mode_input {
+                bot_msg = bot_msg.parse_mode(mode);
+            }
+            
+            match bot_msg.await {
+                Ok(msg) => Some(msg.id),
+                Err(e) => {
+                    log::error!("Failed to edit message: {}", e);
+                    log_try_delete_msg(&bot, chat_id, id).await;
+                    // Failed to edit message, try to send a new one
+                    let mut bot_msg = bot.send_message(chat_id, message_text);
+                    if let Some(markup) = markup_input {
+                        bot_msg = bot_msg.reply_markup(markup);
+                    }
+                    if let Some(mode) = parse_mode_input {
+                        bot_msg = bot_msg.parse_mode(mode);
+                    }
+                    send_msg(bot_msg, username).await
+                }
+            }
+        }
+        None => {
+            // Send a new message
+            let mut bot_msg = bot.send_message(chat_id, message_text);
+            if let Some(markup) = markup_input {
+                bot_msg = bot_msg.reply_markup(markup);
+            }
+            if let Some(mode) = parse_mode_input {
+                bot_msg = bot_msg.parse_mode(mode);
+            }
+            send_msg(bot_msg, username).await
         }
     }
 }

@@ -20,11 +20,11 @@ pub(super) enum Commands {
     Register,
     #[command(description = "Indicate or modify your availability (for SANS)")]
     Availability,
-    #[command(description = "View upcoming planned")]
+    #[command(description = "View upcoming planned for yourself")]
     Upcoming,
     // #[command(description = "Add information about your movement")]
     // Movement,
-    #[command(description = "View information about the future availability")]
+    #[command(description = "Display information about future availability")]
     Forecast,
     #[command(description = "Cancel current action")]
     Cancel,
@@ -38,11 +38,11 @@ pub(super) enum Commands {
 pub(super) enum PrivilegedCommands {
     #[command(description = "Approve registration requests")]
     Approve,
-    #[command(description = "Modify user attributes, /user <OPS NAME>")]
+    #[command(description = "Modify user attributes of or delete user")]
     User {
         ops_name: String
     },
-    #[command(description = "Plan for flight, /plan <OPS NAME> or /plan <date>")]
+    #[command(description = "Plan a user for flight")]
     Plan {
         ops_name_or_date: String
     },
@@ -56,7 +56,7 @@ pub(super) enum PrivilegedCommands {
 pub(super) async fn set_menu_buttons(bot: Bot, chat_id: ChatId, user_id: UserId, is_admin: bool, is_public: bool) {
     let mut commands: Vec<BotCommand> = Commands::bot_commands().to_vec();
     
-    log::info!("Setting menu buttons for chat ({}): admin: {}, public: {}", chat_id.0, is_admin, is_public);
+    log::debug!("Setting menu buttons for chat ({}): admin: {}, public: {}", chat_id.0, is_admin, is_public);
     // If the user is an admin, and not in a public chat, append privileged commands
     if is_admin && !is_public {
         let mut privileged_commands = PrivilegedCommands::bot_commands().to_vec();
@@ -65,6 +65,15 @@ pub(super) async fn set_menu_buttons(bot: Bot, chat_id: ChatId, user_id: UserId,
     
     if is_public {
         // Set the combined commands for the chat
+        if is_admin {
+            // Extract the `Notify` command from PrivilegedCommands
+            if let Some(notify_cmd) = PrivilegedCommands::bot_commands().iter()
+                .find(|cmd| cmd.command == "/notify").cloned() {
+                commands.push(notify_cmd);
+            } else {
+                log::error!("Notify command not found in PrivilegedCommands");
+            }
+        }
         match bot.set_my_commands(commands).scope(BotCommandScope::ChatMember { chat_id: Recipient::Id(chat_id), user_id }).await {
             Ok(_) => {}
             Err(err) => {
@@ -119,8 +128,12 @@ pub(super) async fn help(bot: Bot, dialogue: MyDialogue, msg: Message, pool: PgP
     let is_public_chat = matches!(&msg.chat.kind, ChatKind::Public(_));
 
     // Append admin commands to the help message if the user is an admin
-    if is_admin && !is_public_chat {
-        help_str = format!("{}\n\nAdmin Commands:\n{}", help_str, PrivilegedCommands::descriptions());
+    if is_admin {
+        if !is_public_chat {
+            help_str = format!("{}\n\nAdmin Commands:\n{}", help_str, PrivilegedCommands::descriptions());
+        } else {
+            help_str = format!("{}\n{}", help_str, "Use /notfiy to configure notification settings for the current chat");
+        }
     }
 
     send_msg(
@@ -144,11 +157,31 @@ pub(super) async fn cancel(bot: Bot, dialogue: MyDialogue, msg: Message) -> Hand
         return Ok(());
     };
     
-    send_msg(
-        bot.send_message(msg.chat.id, "Cancelling, returning to start!"),
-        &(user.username)
-    ).await;
+    match dialogue.get().await {
+        Ok(current_state) => {
+            match current_state {
+                Some(State::Start) => {
+                    // User is in the Start state; nothing to cancel
+                    send_msg(
+                        bot.send_message(msg.chat.id, "Nothing to cancel."),
+                        &(user.username),
+                    ).await;
+                },
+                _ => {
+                    // User is in an active state; cancel the operation
+                    send_msg(
+                        bot.send_message(msg.chat.id, "Cancelling, returning to start!"),
+                        &(user.username)
+                    ).await;
+
+                    // Reset the dialogue state to Start
+                    dialogue.update(State::Start).await?;
+                }
+            }
+
+        }
+        Err(_) => {}
+    }
     
-    dialogue.update(State::Start).await?;
     Ok(())
 }
