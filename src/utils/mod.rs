@@ -343,7 +343,6 @@ static DATE_RANGE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         .collect()
 });
 
-// Parses a date range string into a DateRange struct
 // Parses a date range string into a Vec<NaiveDate>
 pub fn parse_date_range(input: &str) -> Result<Vec<NaiveDate>, String> {
     let today = Local::now().naive_local().date();

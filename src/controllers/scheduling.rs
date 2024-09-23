@@ -117,7 +117,7 @@ pub(crate) async fn edit_avail_by_uuid(
                 times.scheduled_time
             FROM (
                 -- Immediate Notification
-                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
+                SELECT NOW() + INTERVAL '1 mins' AS scheduled_time
                 UNION ALL
                 -- 5 Days Prior Notification (only if at least 5 days remain)
                 SELECT
@@ -401,7 +401,8 @@ pub(crate) async fn add_user_avail(
                 SET
                     ict_type = EXCLUDED.ict_type,
                     remarks = COALESCE(EXCLUDED.remarks, availability.remarks),
-                    planned = COALESCE(EXCLUDED.planned, availability.planned)
+                    planned = COALESCE(EXCLUDED.planned, availability.planned),
+                    is_valid = TRUE
             RETURNING *
         ),
         notification_handling AS (
@@ -426,7 +427,7 @@ pub(crate) async fn add_user_avail(
                 times.scheduled_time
             FROM (
                 -- Immediate Notification
-                SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
+                SELECT NOW() + INTERVAL '1 mins' AS scheduled_time
                 UNION ALL
                 -- 5 Days Prior Notification (only if at least 5 days remain)
                 SELECT
@@ -687,7 +688,7 @@ pub(crate) async fn toggle_planned_status_multiple(
                     times.scheduled_time
                 FROM (
                     -- Immediate Notification
-                    SELECT NOW() + INTERVAL '5 mins' AS scheduled_time
+                    SELECT NOW() + INTERVAL '1 mins' AS scheduled_time
                     UNION ALL
                     -- 5 Days Prior Notification
                     SELECT
