@@ -1,0 +1,8 @@
+[package]
+name = "callback_data"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+callback_data_traits = { path = "../callback_data_traits" }
+callback_data_derive = { path = "../callback_data_derive" }

@@ -1,0 +1,111 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            availability.id,\n            usrs.ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            availability.avail,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.planned,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE\n          AND availability.avail >= $2\n          AND (availability.is_valid = TRUE OR availability.planned = TRUE)\n        ORDER BY availability.avail ASC;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "ops_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "usr_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "user_type_enum",
+            "kind": {
+              "Enum": [
+                "staff",
+                "ns",
+                "active"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "avail",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 4,
+        "name": "ict_type: _",
+        "type_info": {
+          "Custom": {
+            "name": "ict_enum",
+            "kind": {
+              "Enum": [
+                "live",
+                "sims",
+                "other"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "remarks",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "planned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "saf100",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "attended",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "is_valid",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "88f15ee51a47d360e62707ff9a93ebf8d8a912cbaca308ab886c60a9d97443f4"
+}
