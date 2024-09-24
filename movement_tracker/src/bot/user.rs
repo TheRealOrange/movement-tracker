@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use chrono::Local;
 
 use sqlx::PgPool;
@@ -14,7 +13,6 @@ use crate::{controllers, log_endpoint_hit, notifier, utils};
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
-use uuid::Uuid;
 use callback_data::{CallbackData, CallbackDataHandler};
 use crate::utils::generate_prefix;
 

@@ -9,7 +9,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, notifier, utils};
-use crate::types::{Availability, AvailabilityDetails};
+use crate::types::{Availability, AvailabilityDetails, Usr};
 use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
@@ -465,14 +465,69 @@ pub(super) async fn saf100_confirm(
                         format!(
                             "{} has confirmed SAF100 issued for `{}` on {}",
                              utils::username_link_tag(&q.from),
-                            details.ops_name,
+                            utils::escape_special_characters(&details.ops_name),
                             utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string())
                         ).as_str(),
                         &pool,
                         q.from.id.0 as i64
                     ).await;
                     
-                    let message_text = format!("SAF100 confirmed issued for `{}` on {}", details.ops_name, details.avail.format("%Y-%m-%d"));
+                    let mut failed;
+                    let mut retrieved: Option<Usr> = None;
+                    
+                    match controllers::user::get_user_by_uuid(&pool, availability.user_id).await {
+                        Ok(user_details) => {
+                            // Notify the user that SAF100 has been sent for them
+                            match send_msg(
+                                bot.send_message(
+                                    ChatId(user_details.tele_id), 
+                                    format!("SAF100 for {} sent to NS branch for processing.\nPlease look out for it.", details.avail.format("%Y-%m-%d"))
+                                ),
+                                &q.from.username,
+                            ).await {
+                                None => failed = true,
+                                Some(_) => failed = false,
+                            }
+                            retrieved = Some(user_details);
+                        }
+                        Err(_) => {
+                            // Failed to notify nsmen
+                            failed = true;
+                        }
+                    }
+                    
+                    let mut message_text = format!(
+                        "SAF100 confirmed issued for `{}` on {}", 
+                        utils::escape_special_characters(&details.ops_name), 
+                        utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string())
+                    );
+                    
+                    if failed {
+                        message_text.push_str("\n⚠️ *Failed* to send notification to ");
+                        match retrieved {
+                            None => {}
+                            Some(details) => {
+                                // Fetch the user's chat info dynamically using getChat
+                                let user_chat = bot.get_chat(ChatId(details.tele_id)).await;
+                                let mut failed_to_get_username = false;
+                                match user_chat {
+                                    Ok(chat) => {
+                                        match chat.username() {
+                                            None => { failed_to_get_username = true; }
+                                            Some(username) => {
+                                                message_text.push_str(format!(" @{} \\!", utils::escape_special_characters(&username)).as_str());
+                                            }
+                                        }
+                                    },
+                                    Err(_) => { failed_to_get_username = true; }
+                                };
+                                if failed_to_get_username {
+                                    message_text.push_str(format!("[{}](tg://user?id={}) \\!", utils::escape_special_characters(&details.name), details.tele_id as u64).as_str())
+                                }
+                            }
+                        }
+                    }
+                    
                     // Send or edit message
                     send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
                     handle_re_show_options(&bot, &dialogue, &q.from.username, start, 8, action, None, &pool).await?;
