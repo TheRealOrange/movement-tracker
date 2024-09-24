@@ -101,54 +101,54 @@ pub fn callback_data_handler_derive(input: TokenStream) -> TokenStream {
             Fields::Unit => {
                 // Variants without fields
                 serialize_arms.push(quote! {
-                    #enum_name::#variant_name => {
-                        let payload = #helper_struct_name {
-                            prefix: prefix.to_string(),
-                            data: #enum_name::#variant_name,
-                        };
-                        let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
-                        #base64_path::encode(&serialized)
-                    }
-                });
+                #enum_name::#variant_name => {
+                    let payload = #helper_struct_name {
+                        prefix: prefix.to_string(),
+                        data: #enum_name::#variant_name,
+                    };
+                    let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
+                    #base64_path::encode(&serialized)
+                }
+            });
             },
             Fields::Named(_) | Fields::Unnamed(_) => {
                 // Variants with fields
                 serialize_arms.push(quote! {
-                    variant => {
-                        let payload = #helper_struct_name {
-                            prefix: prefix.to_string(),
-                            data: variant.clone(),
-                        };
-                        let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
-                        #base64_path::encode(&serialized)
-                    }
-                });
+                #enum_name::#variant_name { .. } => {
+                    let payload = #helper_struct_name {
+                        prefix: prefix.to_string(),
+                        data: self.clone(),
+                    };
+                    let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
+                    #base64_path::encode(&serialized)
+                }
+            });
             },
         }
     }
 
     // Generate the implementation of the trait
     let expanded = quote! {
-        #helper_struct
+    #helper_struct
 
-        impl #trait_path for #enum_name {
-            fn to_callback_data(&self, prefix: &str) -> String {
-                match self {
-                    #( #serialize_arms ),*
-                }
-            }
-
-            fn from_callback_data(data: &str, expected_prefix: &str) -> Option<Self> {
-                let decoded = #base64_path::decode(data).ok()?;
-                let payload: #helper_struct_name<#enum_name> = #rmp_ser_path::from_slice(&decoded).ok()?;
-                if payload.prefix == expected_prefix {
-                    Some(payload.data)
-                } else {
-                    None
-                }
+    impl #trait_path for #enum_name {
+        fn to_callback_data(&self, prefix: &str) -> String {
+            match self {
+                #( #serialize_arms ),*
             }
         }
-    };
+
+        fn from_callback_data(data: &str, expected_prefix: &str) -> Option<Self> {
+            let decoded = #base64_path::decode(data).ok()?;
+            let payload: #helper_struct_name<#enum_name> = #rmp_ser_path::from_slice(&decoded).ok()?;
+            if payload.prefix == expected_prefix {
+                Some(payload.data)
+            } else {
+                None
+            }
+        }
+    }
+};
 
     TokenStream::from(expanded)
 }
