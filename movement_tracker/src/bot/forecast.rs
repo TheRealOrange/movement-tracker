@@ -31,7 +31,7 @@ pub enum ForecastCallbackData {
     ChangeRole { role_type: RoleType },
 
     // Completion Action
-    ForecastDone
+    Done
 }
 
 async fn display_availability_forecast(
@@ -72,7 +72,7 @@ async fn display_availability_forecast(
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     options.push(change_view_roles);
     options.extend(view_range);
-    options.push(vec![InlineKeyboardButton::callback("DONE", ForecastCallbackData::ForecastDone.to_callback_data(&prefix))]);
+    options.push(vec![InlineKeyboardButton::callback("DONE", ForecastCallbackData::Done.to_callback_data(&prefix))]);
 
     // Header for role type and period with formatted dates
     let mut output_text = format!(
@@ -275,7 +275,7 @@ pub(super) async fn forecast_view(
         ForecastCallbackData::ChangeRole { role_type } => {
             new_role = role_type;
         }
-        ForecastCallbackData::ForecastDone => {
+        ForecastCallbackData::Done => {
             if availability_list.is_empty() {
                 // Delete the existing message if no availability is shown
                 log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;

@@ -106,6 +106,7 @@ pub(super) enum State {
     // States used for adding and modifying availability for SANS
     AvailabilityView {
         msg_id: MessageId,
+        prefix: String,
         availability_list: Vec<Availability>
     },
     AvailabilitySelect {
@@ -117,12 +118,14 @@ pub(super) enum State {
     },
     AvailabilityModify {
         msg_id: MessageId,
+        prefix: String,
         availability_entry: Availability,
         action: String,
         start: usize
     },
     AvailabilityModifyType {
         msg_id: MessageId,
+        prefix: String,
         change_msg_id: MessageId,
         availability_entry: Availability,
         action: String,
@@ -137,21 +140,25 @@ pub(super) enum State {
     },
     AvailabilityDeleteConfirm {
         msg_id: MessageId,
+        prefix: String,
         availability_entry: Availability,
         action: String,
         start: usize
     },
     AvailabilityAdd {
         msg_id: MessageId,
+        prefix: String,
         avail_type: Ict
     },
     AvailabilityAddChangeType {
         msg_id: MessageId,
+        prefix: String,
         change_type_msg_id: MessageId,
         avail_type: Ict
     },
     AvailabilityAddRemarks {
         msg_id: MessageId,
+        prefix: String,
         change_msg_id: MessageId,
         avail_type: Ict,
         avail_dates: Vec<NaiveDate>
@@ -290,8 +297,8 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserSelect].endpoint(user_select))
         )
         .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
-        .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))
-        .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
+        .branch(case![State::AvailabilityAdd { msg_id, prefix, avail_type }].endpoint(availability_add_message))
+        .branch(case![State::AvailabilityAddRemarks { msg_id, prefix, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
         //everything below is a catchall case to tell the user they should use a callback button rather than send a message
         .branch(case![State::RegisterRole { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::RegisterType { msg_id, prefix, role_type }].endpoint(press_button_prompt))
@@ -310,12 +317,12 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityModify { msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityDeleteConfirm { msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start }].endpoint(press_button_prompt))
         .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(press_button_prompt));
     
 
@@ -339,14 +346,14 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
             .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
         )
-        .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
+        .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
-        .branch(case![State::AvailabilityModify { msg_id, availability_entry, action, start }].endpoint(availability_modify))
-        .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
-        .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_callback))
-        .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
-        .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
-        .branch(case![State::AvailabilityDeleteConfirm { msg_id, availability_entry, action, start }].endpoint(availability_delete_confirm))
+        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(availability_modify))
+        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
+        .branch(case![State::AvailabilityAdd { msg_id, prefix, avail_type }].endpoint(availability_add_callback))
+        .branch(case![State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
+        .branch(case![State::AvailabilityAddRemarks { msg_id, prefix, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
+        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start }].endpoint(availability_delete_confirm))
         .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()

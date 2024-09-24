@@ -1,16 +1,56 @@
-use crate::bot::state::State;
-use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
-use crate::types::{Availability, AvailabilityDetails, Ict, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use std::cmp::{max, min};
+use std::str::FromStr;
+
 use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
 use sqlx::PgPool;
-use std::cmp::{max, min};
-use std::str::FromStr;
+
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
+
+use crate::bot::state::State;
+use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+use crate::types::{Availability, AvailabilityDetails, Ict, RoleType, UsrType};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::utils::generate_prefix;
+
+use serde::{Serialize, Deserialize};
+use strum::EnumProperty;
+use callback_data::CallbackData;
+use callback_data::CallbackDataHandler;
+
+// Represents callback actions with optional associated data.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
+pub enum AvailabilityCallbacks {
+    // Option Actions
+    Add,
+    Modify,
+    Delete,
+    Back,
+    
+    // Pagination Actions
+    Prev,
+    Next,
+    
+    // Modify Actions
+    ChangeType,
+    ModifyRemarks,
+    ModifyDelete,
+    
+    // Change Availability type Action
+    SelectType { avail_type: Ict },
+
+    // Completion Actions
+    Done,
+    Cancel,
+
+    // Select Availability entry associated UUID
+    Select { id: Uuid },
+
+    // Confirmation Actions
+    ConfirmYes,
+    ConfirmNo,
+}
 
 fn get_availability_edit_keyboard(
     availability: &Vec<Availability>,
@@ -54,7 +94,7 @@ fn get_availability_edit_keyboard(
             if entry.is_valid {
                 Some(vec![InlineKeyboardButton::callback(
                     formatted,
-                    format!("{}{}", prefix, entry.id),
+                    AvailabilityCallbacks::Select { id: entry.id }.to_callback_data(&prefix),
                 )])
             } else {
                 None
@@ -65,12 +105,12 @@ fn get_availability_edit_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbacks::Prev.to_callback_data(&prefix)));
     }
     if slice_end < availability.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
+        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbacks::Next.to_callback_data(&prefix)));
     }
-    pagination.push(InlineKeyboardButton::callback("DONE", "DONE"));
+    pagination.push(InlineKeyboardButton::callback("DONE", AvailabilityCallbacks::Done.to_callback_data(&prefix)));
 
     // Combine entries with pagination
     entries.push(pagination);
@@ -96,20 +136,20 @@ fn get_availability_edit_text(
     message_text
 }
 
-async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>, msg_id: Option<MessageId>) -> Option<MessageId> {
+async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Option<String>, existing: &Vec<Availability>, prefix: &String, msg_id: Option<MessageId>) -> Option<MessageId> {
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
 
-    let mut control_row: Vec<InlineKeyboardButton> = vec![InlineKeyboardButton::callback("ADD", "ADD")];
-    let control_options: Vec<InlineKeyboardButton> = ["MODIFY", "DELETE"]
+    let mut control_row: Vec<InlineKeyboardButton> = vec![InlineKeyboardButton::callback("ADD", AvailabilityCallbacks::Add.to_callback_data(&prefix))];
+    let control_options: Vec<InlineKeyboardButton> = [("MODIFY", AvailabilityCallbacks::Modify), ("DELETE", AvailabilityCallbacks::Delete)]
         .into_iter()
-        .map(|option| InlineKeyboardButton::callback(option, option))
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
         .collect();
     
     if existing.len() > 0 {
         control_row.extend(control_options);
     }
     options.push(control_row);
-    options.push(vec![InlineKeyboardButton::callback("DONE", "DONE")]);
+    options.push(vec![InlineKeyboardButton::callback("DONE", AvailabilityCallbacks::Done.to_callback_data(&prefix))]);
 
     let mut output_text = String::new();
     if existing.is_empty() {
@@ -219,15 +259,16 @@ async fn display_availability_edit_prompt(
     chat_id: ChatId,
     username: &Option<String>,
     availability_entry: &Availability,
+    prefix: &String,
     msg_id: MessageId
 ) -> Option<MessageId> {
-    let edit: Vec<InlineKeyboardButton> = ["TYPE", "REMARKS"]
+    let edit: Vec<InlineKeyboardButton> = [("TYPE", AvailabilityCallbacks::ChangeType), ("REMARKS", AvailabilityCallbacks::ModifyRemarks)]
         .into_iter()
-        .map(|option| InlineKeyboardButton::callback(option, option))
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
         .collect();
-    let options: Vec<InlineKeyboardButton> = ["DELETE", "BACK"]
+    let options: Vec<InlineKeyboardButton> = [("DELETE", AvailabilityCallbacks::ModifyDelete), ("BACK", AvailabilityCallbacks::Back)]
         .into_iter()
-        .map(|option| InlineKeyboardButton::callback(option, option))
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
         .collect();
     
     let formatted_date = availability_entry.avail.format("%b-%d").to_string();
@@ -244,9 +285,9 @@ async fn display_availability_edit_prompt(
     send_or_edit_msg(&bot, chat_id, username, Some(msg_id), availability_edit_text, Some(keyboard), None).await
 }
 
-async fn display_edit_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
+async fn display_edit_types(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
     let ict_types = [Ict::LIVE, Ict::OTHER]
-        .map(|ict_types| InlineKeyboardButton::callback(ict_types.as_ref(), ict_types.as_ref()));
+        .map(|ict_types| InlineKeyboardButton::callback(ict_types.clone().as_ref(), AvailabilityCallbacks::SelectType { avail_type: ict_types }.to_callback_data(prefix)));
     send_msg(
         bot.send_message(chat_id, "Available for:")
             .reply_markup(InlineKeyboardMarkup::new([ict_types])),
@@ -261,9 +302,9 @@ async fn display_edit_remarks(bot: &Bot, chat_id: ChatId, username: &Option<Stri
     ).await
 }
 
-async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, username: &Option<String>, msg_id: MessageId) -> Option<MessageId> {
-    let edit = ["CHANGE TYPE", "CANCEL"]
-        .map(|option| InlineKeyboardButton::callback(option, option));
+async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, username: &Option<String>, prefix: &String, msg_id: MessageId) -> Option<MessageId> {
+    let edit = [("CHANGE TYPE", AvailabilityCallbacks::ChangeType), ("CANCEL", AvailabilityCallbacks::Cancel)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)));
     let message_text = format!(
         "Available for: {}\n\nType the dates for which you want to indicate availability. Use commas(only) to separate dates. (e.g. Jan 2, 28/2, 17/04/24)",
         avail_type.as_ref());
@@ -271,9 +312,9 @@ async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, u
     send_or_edit_msg(&bot, chat_id, username, Some(msg_id), message_text, Some(InlineKeyboardMarkup::new([edit])), None).await
 }
 
-async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
-    let options = ["DONE", "CANCEL"]
-        .map(|option| InlineKeyboardButton::callback(option, option));
+async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
+    let options = [("DONE", AvailabilityCallbacks::Done), ("CANCEL", AvailabilityCallbacks::Cancel)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
     
     send_msg(
         bot.send_message(chat_id, "Type your remarks if any (this will be indicated for all the dates you indicated), or /cancel if anything is wrong:")
@@ -282,9 +323,9 @@ async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<Strin
     ).await
 }
 
-async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Option<String>, msg_id: Option<MessageId>, entry: &Availability) -> Option<MessageId> {
-    let confirm = ["YES", "NO"]
-        .map(|product| InlineKeyboardButton::callback(product, product));
+async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Option<String>, msg_id: Option<MessageId>, entry: &Availability, prefix: &String) -> Option<MessageId> {
+    let confirm = [("YES", AvailabilityCallbacks::ConfirmYes), ("NO", AvailabilityCallbacks::ConfirmNo)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
     
     let message_text = format!(
         "You have already been planned on __{}__{}\\.\nConfirm rescind availability?", 
@@ -368,23 +409,18 @@ async fn handle_go_back(
     pool: &PgPool,
     msg_id: Option<MessageId>
 ) -> HandlerResult {
-    
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(5)
-        .map(char::from)
-        .collect();
+    let prefix = generate_prefix();
 
     // Retrieve all the pending applications
     match controllers::scheduling::get_upcoming_availability_by_tele_id(pool, tele_id)
         .await {
         Ok(availability_list) => {
             if availability_list.len() == 0 {
-                match display_availability_options(bot, dialogue.chat_id(), username, &availability_list, msg_id).await {
+                match display_availability_options(bot, dialogue.chat_id(), username, &availability_list, &prefix, msg_id).await {
                     None => {}
                     Some(msg_id) => {
-                        dialogue.update(State::AvailabilityView { msg_id, availability_list }).await?;
+                        dialogue.update(State::AvailabilityView { msg_id, prefix, availability_list }).await?;
                     }
                 };
             } else {
@@ -512,14 +548,17 @@ pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, p
         return Ok(());
     };
 
+    // Generate random prefix to make the IDs only applicable to this dialogue instance
+    let prefix = generate_prefix();
+
     // Retrieve all the pending applications
     match controllers::scheduling::get_upcoming_availability_by_tele_id(&pool, user.id.0)
         .await {
         Ok(availability_list) => {
-            match display_availability_options(&bot, dialogue.chat_id(), &user.username, &availability_list, None).await {
+            match display_availability_options(&bot, dialogue.chat_id(), &user.username, &availability_list, &prefix, None).await {
                 None => {}
                 Some(msg_id) => {
-                    dialogue.update(State::AvailabilityView { msg_id, availability_list }).await?
+                    dialogue.update(State::AvailabilityView { msg_id, prefix, availability_list }).await?
                 }
             };
         }
@@ -532,56 +571,69 @@ pub(super) async fn availability(bot: Bot, dialogue: MyDialogue, msg: Message, p
 pub(super) async fn availability_view(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, availability_list): (MessageId, Vec<Availability>),
+    (msg_id, prefix, availability_list): (MessageId, String, Vec<Availability>),
     q: CallbackQuery,
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_view", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Availability" => availability_list
     );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
 
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+
+    let prefix = generate_prefix();
+
+    let start = 0;
+    let show = 8;
+    
+    match callback {
+        AvailabilityCallbacks::Add => {
+            let avail_type = Ict::LIVE;
+            match update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, &prefix, msg_id).await {
+                None => {}
+                Some(new_msg_id) => {
+                    dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, prefix, avail_type }).await?
+                }
+            };
+        }
+        AvailabilityCallbacks::Modify => {
+            // Determine the action based on the enum
+            let action = "MODIFY_AVAILABILITY".to_string();
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, Some(msg_id)).await?;
+        } AvailabilityCallbacks::Delete => {
+            let action = "DELETE_AVAILABILITY".to_string();
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, Some(msg_id)).await?;
+        }
+        AvailabilityCallbacks::Done => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Returned to start."),
                 &q.from.username,
             ).await;
+            dialogue.update(State::Start).await?
         }
-        Some(option) => {
-            // Generate random prefix to make the IDs only applicable to this dialogue instance
-            let prefix: String = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(5)
-                .map(char::from)
-                .collect();
-            
-            let start = 0;
-            let show = 8;
-            if option == "ADD" {
-                let avail_type = Ict::LIVE;
-                match update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, msg_id).await {
-                    None => {}
-                    Some(new_msg_id) => {
-                        dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, avail_type }).await?
-                    }
-                };
-            } else if option == "MODIFY" || option == "DELETE" {
-                let action = option.clone();
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, Some(msg_id)).await?;
-            } else if option == "DONE" {
-                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Returned to start."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
-            }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
     
@@ -591,44 +643,53 @@ pub(super) async fn availability_view(
 pub(super) async fn availability_add_callback(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, avail_type): (MessageId, Ict), 
+    (msg_id, prefix, avail_type): (MessageId, String, Ict), 
     q: CallbackQuery,
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_callback", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Avail Type" => avail_type
     );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
 
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::ChangeType => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_types(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(new_msg_id) => dialogue.update(State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id: new_msg_id, avail_type }).await?
+            }
+        }
+        AvailabilityCallbacks::Cancel => {
+            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                 &q.from.username,
             ).await;
         }
-        Some(option) => {
-            if option == "CHANGE TYPE" {
-                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                match display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await {
-                    None => dialogue.update(State::ErrorState).await?,
-                    Some(new_msg_id) => dialogue.update(State::AvailabilityAddChangeType { msg_id, change_type_msg_id: new_msg_id, avail_type }).await?
-                }
-            } else if option == "CANCEL" {
-                log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
-            } else {
-                dialogue.update(State::ErrorState).await?
-            }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
     
@@ -638,52 +699,55 @@ pub(super) async fn availability_add_callback(
 pub(super) async fn availability_add_change_type(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, change_type_msg_id, avail_type): (MessageId, MessageId, Ict),
+    (msg_id, prefix, change_type_msg_id, avail_type): (MessageId, String, MessageId, Ict),
     q: CallbackQuery,
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_change_type", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Change Type MessageId" => change_type_msg_id,
         "Avail Type" => avail_type
     );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
 
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::SelectType { avail_type: ict_type_enum } => {
+            if ict_type_enum == Ict::OTHER || ict_type_enum == Ict::LIVE {
+                log_try_delete_msg(&bot, dialogue.chat_id(), change_type_msg_id).await;
+                let avail_type = ict_type_enum;
+                match update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, &prefix, msg_id).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(new_msg_id) => dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, prefix, avail_type }).await?
+                };
+            } else {
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                    &q.from.username,
+                ).await;
+            }
+        }
+        _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
                 &q.from.username,
             ).await;
-        }
-        Some(option) => {
-            match Ict::from_str(&option) {
-                Ok(ict_type_enum) => {
-                    if ict_type_enum == Ict::OTHER || ict_type_enum == Ict::LIVE {
-                        log_try_delete_msg(&bot, dialogue.chat_id(), change_type_msg_id).await;
-                        let avail_type = ict_type_enum;
-                        match update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, msg_id).await {
-                            None => dialogue.update(State::ErrorState).await?,
-                            Some(new_msg_id) => dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, avail_type }).await?
-                        };
-                    } else {
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), "Invalid option."),
-                            &q.from.username,
-                        ).await;
-                    }
-                }
-                _ => {
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
-                        &q.from.username,
-                    ).await;
-                }
-            }
         }
     }
     
@@ -693,13 +757,14 @@ pub(super) async fn availability_add_change_type(
 pub(super) async fn availability_add_message(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, avail_type): (MessageId, Ict),
+    (msg_id, prefix, avail_type): (MessageId, String, Ict),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_message", "Message", msg,
         "MessageId" => msg_id,
+        "Prefix" => prefix, 
         "Avail Type" => avail_type
     );
 
@@ -803,9 +868,9 @@ pub(super) async fn availability_add_message(
                 Some(msg_id) => {
                     // Proceed if there are available dates to register
                     if !available_dates.is_empty() {
-                        match display_add_remarks(&bot, dialogue.chat_id(), &user.username).await {
+                        match display_add_remarks(&bot, dialogue.chat_id(), &user.username, &prefix).await {
                             None => dialogue.update(State::ErrorState).await?,
-                            Some(change_msg_id) => dialogue.update(State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates: available_dates }).await?
+                            Some(change_msg_id) => dialogue.update(State::AvailabilityAddRemarks { msg_id, prefix, change_msg_id, avail_type, avail_dates: available_dates }).await?
                         }
                     }
                 }
@@ -825,13 +890,14 @@ pub(super) async fn availability_add_message(
 pub(super) async fn availability_add_remarks(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, change_msg_id, avail_type, avail_dates): (MessageId, MessageId, Ict, Vec<NaiveDate>),
+    (msg_id, prefix, change_msg_id, avail_type, avail_dates): (MessageId, String, MessageId, Ict, Vec<NaiveDate>),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_remarks", "Message", msg,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Change MessageId" => change_msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
@@ -868,47 +934,57 @@ pub(super) async fn availability_add_remarks(
 pub(super) async fn availability_add_complete(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, change_msg_id, avail_type, avail_dates): (MessageId, MessageId, Ict, Vec<NaiveDate>),
+    (msg_id, prefix, change_msg_id, avail_type, avail_dates): (MessageId, String, MessageId, Ict, Vec<NaiveDate>),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_add_complete", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Change MessageId" => change_msg_id,
         "Avail Type" => avail_type,
         "Avail Dates" => avail_dates
     );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
 
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::Done => {
+            // add availability to database no remarks
+            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
+            register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool, Some(change_msg_id)).await;
+
+            dialogue.update(State::Start).await?
+        }
+        AvailabilityCallbacks::Cancel => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                 &q.from.username,
             ).await;
+            dialogue.update(State::Start).await?
         }
-        Some(option) => {
-            if option == "DONE" {
-                // add availability to database no remarks
-                log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                register_availability(&bot, &dialogue, &q.from.username, q.from.id.0, &avail_dates, &avail_type, None, &pool, Some(change_msg_id)).await;
-                
-                dialogue.update(State::Start).await?
-            } else if option == "CANCEL" {
-                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
-            } else {
-                dialogue.update(State::ErrorState).await?
-            }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
 
@@ -931,75 +1007,78 @@ pub(super) async fn availability_select(
         "Start" => start
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::Prev => {
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 -8) as usize, 8, action, Some(msg_id)).await?;
+        }
+        AvailabilityCallbacks::Next => {
+            let entries_len = availability_list.len();
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, Some(msg_id)).await?;
+        }
+        AvailabilityCallbacks::Cancel => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                 &q.from.username,
             ).await;
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, Some(msg_id)).await?;
+            dialogue.update(State::Start).await?
         }
-        Some(option) => {
-            if option == "PREV" {
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 -8) as usize, 8, action, Some(msg_id)).await?;
-            } else if option == "NEXT" {
-                let entries_len = availability_list.len();
-                handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, Some(msg_id)).await?;
-            } else if option == "CANCEL" {
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
-            } else if option == "DONE" {
-                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Done."),
-                    &q.from.username,
-                ).await;
-                dialogue.update(State::Start).await?
-            } else {
-                match option.strip_prefix(&prefix) {
-                    None => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, Some(msg_id)).await?,
-                    Some(id) => {
-                        match Uuid::try_parse(&id) {
-                            Ok(parsed_id) => {
-                                match controllers::scheduling::get_availability_by_uuid(&pool, parsed_id).await {
-                                    Ok(availability_entry) => {
-                                        if action == "MODIFY" {
-                                            match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, msg_id).await {
-                                                None => dialogue.update(State::ErrorState).await?,
-                                                Some(msg_id) => {
-                                                    log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
-                                                    dialogue.update(State::AvailabilityModify { msg_id, availability_entry, action, start }).await?;
-                                                }
-                                            };
-                                        } else if action == "DELETE" {
-                                            if availability_entry.planned {
-                                                match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry).await {
-                                                    None => dialogue.update(State::ErrorState).await?,
-                                                    Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, availability_entry, action, start }).await?
-                                                }
-                                            } else {
-                                                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
-                                            }
-                                        } else {
-                                            dialogue.update(State::ErrorState).await?;
-                                        }
-                                    }
-                                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
-                                }
+        AvailabilityCallbacks::Done => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Done."),
+                &q.from.username,
+            ).await;
+            dialogue.update(State::Start).await?
+        }
+        AvailabilityCallbacks::Select { id: parsed_id } => {
+            match controllers::scheduling::get_availability_by_uuid(&pool, parsed_id).await {
+                Ok(availability_entry) => {
+                    if action == "MODIFY_AVAILABILITY" {
+                        match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, &prefix, msg_id).await {
+                            None => dialogue.update(State::ErrorState).await?,
+                            Some(msg_id) => {
+                                log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
+                                dialogue.update(State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }).await?;
                             }
-                            Err(_) => handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, 8, action, Some(msg_id)).await?,
+                        };
+                    } else if action == "DELETE_AVAILABILITY" {
+                        if availability_entry.planned {
+                            match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry, &prefix).await {
+                                None => dialogue.update(State::ErrorState).await?,
+                                Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
+                            }
+                        } else {
+                            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
                         }
+                    } else {
+                        dialogue.update(State::ErrorState).await?;
                     }
                 }
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
+        }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
 
@@ -1009,60 +1088,73 @@ pub(super) async fn availability_select(
 pub(super) async fn availability_modify(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, availability_entry, action, start): (MessageId, Availability, String, usize),
+    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Availability" => availability_entry,
         "Action" => action,
         "Start" => start
     );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
 
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::ChangeType => {
+            match display_edit_types(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => {
+                    log::debug!("Transitioning to AvailabilityModifyType with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
+                    dialogue.update(State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }).await?
+                }
+            }
+        }
+        AvailabilityCallbacks::ModifyRemarks => {
+            match display_edit_remarks(&bot, dialogue.chat_id(), &q.from.username).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => {
+                    log::debug!("Transitioning to AvailabilityModifyRemarks with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
+                    dialogue.update(State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }).await?
+                }
+            }
+        }
+        AvailabilityCallbacks::ModifyDelete => {
+            if availability_entry.planned {
+                match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry, &prefix).await {
+                    None => dialogue.update(State::ErrorState).await?,
+                    Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
+                }
+            } else {
+                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+            }
+        }
+        AvailabilityCallbacks::Back => {
+            handle_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, start, 8, action, &pool, Some(msg_id)).await?;
+        }
+        _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                 &q.from.username,
             ).await;
-        }
-        Some(option) => {
-            if option == "TYPE" {
-                match display_edit_types(&bot, dialogue.chat_id(), &q.from.username).await {
-                    None => dialogue.update(State::ErrorState).await?,
-                    Some(change_msg_id) => {
-                        log::debug!("Transitioning to AvailabilityModifyType with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
-                        dialogue.update(State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }).await?
-                    }
-                }
-            } else if option == "REMARKS" {
-                match display_edit_remarks(&bot, dialogue.chat_id(), &q.from.username).await {
-                    None => dialogue.update(State::ErrorState).await?,
-                    Some(change_msg_id) => {
-                        log::debug!("Transitioning to AvailabilityModifyRemarks with Availability: {:?}, Action: {:?}, Start: {:?}", availability_entry, action, start);
-                        dialogue.update(State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }).await?
-                    }
-                }
-                
-            } else if option == "DELETE" {
-                if availability_entry.planned {
-                    match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry).await {
-                        None => dialogue.update(State::ErrorState).await?,
-                        Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, availability_entry, action, start }).await?
-                    }
-                } else {
-                    delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
-                }
-            } else if option == "BACK" {
-                handle_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, start, 8, action, &pool, Some(msg_id)).await?;
-            }
         }
     }
 
@@ -1112,55 +1204,58 @@ pub(super) async fn availability_modify_remarks(
 pub(super) async fn availability_modify_type(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, change_msg_id, availability_entry, action, start): (MessageId, MessageId, Availability, String, usize),
+    (msg_id, prefix, change_msg_id, availability_entry, action, start): (MessageId, String, MessageId, Availability, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_modify_type", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Change MessageId" => change_msg_id,
         "Availability" => availability_entry,
         "Action" => action,
         "Start" => start
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::SelectType { avail_type: ict_type_enum } => {
+            if ict_type_enum == Ict::OTHER || ict_type_enum == Ict::LIVE {
+                log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), format!("Selected type: `{}`", ict_type_enum.as_ref())).parse_mode(ParseMode::MarkdownV2),
+                    &q.from.username,
+                ).await;
+                modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, Some(ict_type_enum), None, &pool, Some(msg_id)).await?;
+            } else {
+                send_msg(
+                    bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                    &q.from.username,
+                ).await;
+            }
+        }
+        _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
                 &q.from.username,
             ).await;
-        }
-        Some(option) => {
-            match Ict::from_str(&option) {
-                Ok(ict_type_enum) => {
-                    if ict_type_enum == Ict::OTHER || ict_type_enum == Ict::LIVE {
-                        log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), format!("Selected type: `{}`", ict_type_enum.as_ref())).parse_mode(ParseMode::MarkdownV2),
-                            &q.from.username,
-                        ).await;
-                        modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, Some(ict_type_enum), None, &pool, Some(msg_id)).await?;
-                    } else {
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), "Invalid option."),
-                            &q.from.username,
-                        ).await;
-                    }
-                }
-                _ => {
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Please select one, or type /cancel to abort."),
-                        &q.from.username,
-                    ).await;
-                }
-            }
         }
     }
     
@@ -1170,42 +1265,54 @@ pub(super) async fn availability_modify_type(
 pub(super) async fn availability_delete_confirm(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, availability_entry, action, start): (MessageId, Availability, String, usize),
+    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
     log_endpoint_hit!(
         dialogue.chat_id(), "availability_delete_confirm", "Callback", q,
         "MessageId" => msg_id,
+        "Prefix" => prefix,
         "Availability" => availability_entry,
         "Action" => action,
         "Start" => start
     );
 
-    match q.data {
-        None => {
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        AvailabilityCallbacks::ConfirmYes => {
+            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+        }
+        AvailabilityCallbacks::ConfirmNo => {
+            match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, &prefix, msg_id).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(msg_id) => {
+                    log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
+                    dialogue.update(State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }).await?;
+                }
+            };
+        }
+        _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                 &q.from.username,
             ).await;
-        }
-        Some(option) => {
-            if option == "YES" {
-                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
-            } else if option == "NO" {
-                match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, msg_id).await {
-                    None => dialogue.update(State::ErrorState).await?,
-                    Some(msg_id) => {
-                        log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
-                        dialogue.update(State::AvailabilityModify { msg_id, availability_entry, action, start }).await?;
-                    }
-                };
-            } else {
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Invalid option."),
-                    &q.from.username,
-                ).await;
-            }
         }
     }
 

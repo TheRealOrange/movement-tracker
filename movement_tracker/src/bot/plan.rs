@@ -23,7 +23,7 @@ use callback_data::CallbackDataHandler;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum AvailabilityCallbackData {
+pub enum PlanCallbacks {
     // Pagination Actions
     Prev,
     Next,
@@ -36,7 +36,7 @@ pub enum AvailabilityCallbackData {
     ViewRole { role: RoleType },
 
     // Plan Toggle Actions with associated UUID
-    PlanToggle { id: Uuid },
+    Toggle { id: Uuid },
 
     // Confirmation Actions
     ConfirmYes,
@@ -89,7 +89,7 @@ fn get_user_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                AvailabilityCallbackData::PlanToggle { id: entry.id }.to_callback_data(prefix),
+                PlanCallbacks::Toggle { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -97,16 +97,16 @@ fn get_user_availability_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbackData::Prev.to_callback_data(prefix)));
+        pagination.push(InlineKeyboardButton::callback("PREV", PlanCallbacks::Prev.to_callback_data(prefix)));
     }
     if slice_end < availability_list.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbackData::Next.to_callback_data(prefix)));
+        pagination.push(InlineKeyboardButton::callback("NEXT", PlanCallbacks::Next.to_callback_data(prefix)));
     }
 
     entries.push(pagination);
     entries.push(vec![
-        InlineKeyboardButton::callback("DONE", AvailabilityCallbackData::Done.to_callback_data(prefix)),
-        InlineKeyboardButton::callback("CANCEL", AvailabilityCallbackData::Cancel.to_callback_data(prefix))
+        InlineKeyboardButton::callback("DONE", PlanCallbacks::Done.to_callback_data(prefix)),
+        InlineKeyboardButton::callback("CANCEL", PlanCallbacks::Cancel.to_callback_data(prefix))
     ]);
 
     Ok(InlineKeyboardMarkup::new(entries))
@@ -159,7 +159,7 @@ fn get_date_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                AvailabilityCallbackData::PlanToggle { id: entry.id }.to_callback_data(prefix),
+                PlanCallbacks::Toggle { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -170,7 +170,7 @@ fn get_date_availability_keyboard(
             if *role_type != role {
                 Some(InlineKeyboardButton::callback(
                     format!("VIEW {}", role.as_ref()),
-                    AvailabilityCallbackData::ViewRole { role }.to_callback_data(prefix),
+                    PlanCallbacks::ViewRole { role }.to_callback_data(prefix),
                 ))
             } else {
                 None
@@ -181,17 +181,17 @@ fn get_date_availability_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbackData::Prev.to_callback_data(prefix)));
+        pagination.push(InlineKeyboardButton::callback("PREV", PlanCallbacks::Prev.to_callback_data(prefix)));
     }
     if slice_end < availability_list.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbackData::Next.to_callback_data(prefix)));
+        pagination.push(InlineKeyboardButton::callback("NEXT", PlanCallbacks::Next.to_callback_data(prefix)));
     }
 
     entries.push(change_view_roles);
     entries.push(pagination);
     entries.push(vec![
-        InlineKeyboardButton::callback("DONE", AvailabilityCallbackData::Done.to_callback_data(prefix)),
-        InlineKeyboardButton::callback("CANCEL", AvailabilityCallbackData::Cancel.to_callback_data(prefix))
+        InlineKeyboardButton::callback("DONE", PlanCallbacks::Done.to_callback_data(prefix)),
+        InlineKeyboardButton::callback("CANCEL", PlanCallbacks::Cancel.to_callback_data(prefix))
     ]);
 
     Ok(InlineKeyboardMarkup::new(entries))
@@ -808,7 +808,7 @@ pub(super) async fn plan_view(
 
     // Handle based on the variant
     match callback {
-        AvailabilityCallbackData::Prev => {
+        PlanCallbacks::Prev => {
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
                 user_details, selected_date, changes, role_type,
@@ -816,7 +816,7 @@ pub(super) async fn plan_view(
                 msg_id, &pool
             ).await?;
         }
-        AvailabilityCallbackData::Next => {
+        PlanCallbacks::Next => {
             let entries_len = availability_list.len();
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
@@ -825,11 +825,11 @@ pub(super) async fn plan_view(
                 msg_id, &pool
             ).await?;
         }
-        AvailabilityCallbackData::Cancel => {
+        PlanCallbacks::Cancel => {
             send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation cancelled.".into(), None, None).await;
             dialogue.update(State::Start).await?;
         }
-        AvailabilityCallbackData::Done => {
+        PlanCallbacks::Done => {
             // commit changes
             log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
@@ -882,7 +882,7 @@ pub(super) async fn plan_view(
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
-        AvailabilityCallbackData::PlanToggle { id: parsed_avail_uuid} => {
+        PlanCallbacks::Toggle { id: parsed_avail_uuid} => {
             // plan or unplan users
             // if currently planned -> unplan user
             // if currently unplanned -> plan user
@@ -898,7 +898,7 @@ pub(super) async fn plan_view(
                 prefix, start, 8, msg_id, &pool
             ).await?;
         }
-        AvailabilityCallbackData::ViewRole { role: role_type_enum } => {
+        PlanCallbacks::ViewRole { role: role_type_enum } => {
             match selected_date {
                 Some(selected_date) => {
                     // Show the available users on that day
