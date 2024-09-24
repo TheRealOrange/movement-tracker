@@ -47,7 +47,7 @@ async fn set_attendance(
             update_statement.created,
             update_statement.updated
         FROM usrs, update_statement
-        WHERE usrs.tele_id = $2;
+        WHERE usrs.tele_id = $2 AND usrs.is_valid = TRUE;
         "#,
         attended,
         tele_id,
@@ -94,7 +94,7 @@ pub(crate) async fn get_future_planned_availability_for_ns(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.usr_type = $1
+        WHERE usrs.usr_type = $1 AND usrs.is_valid = TRUE
           AND availability.planned = TRUE
           AND availability.avail >= $2
         ORDER BY availability.avail ASC;
@@ -146,7 +146,7 @@ pub(crate) async fn get_future_valid_availability_for_ns(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.usr_type = $1
+        WHERE usrs.usr_type = $1 AND usrs.is_valid = TRUE
           AND availability.is_valid = TRUE
           AND availability.avail >= $2
         ORDER BY availability.avail ASC;
@@ -219,7 +219,7 @@ pub(crate) async fn set_saf100_true_by_uuid(
         FROM usrs, update_statement
         WHERE usrs.id = (
             SELECT usr_id FROM availability WHERE id = $1
-        );
+        ) AND usrs.is_valid = TRUE;
         "#,
         id,
     )

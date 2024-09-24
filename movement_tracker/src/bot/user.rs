@@ -106,7 +106,7 @@ async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<S
         .map(|usrtype| InlineKeyboardButton::callback(usrtype.clone().as_ref(), UserEditCallbacks::SelectUserType { user_type: usrtype }.to_callback_data(&prefix)));
 
     send_msg(
-        bot.send_message(chat_id, "Select user type:")
+        bot.send_message(chat_id, "Please select user type:")
             .reply_markup(InlineKeyboardMarkup::new([usrtypes])),
         username
     ).await
@@ -117,7 +117,7 @@ async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<S
         .map(|roletype| InlineKeyboardButton::callback(roletype.clone().as_ref(), UserEditCallbacks::SelectRoleType { role_type: roletype }.to_callback_data(&prefix)));
 
     send_msg(
-        bot.send_message(chat_id, "Select role type:")
+        bot.send_message(chat_id, "Please select role type:")
             .reply_markup(InlineKeyboardMarkup::new([role_types])),
         username
     ).await
