@@ -1,9 +1,6 @@
 use std::sync::Arc;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
 
 use sqlx::PgPool;
-use sqlx::types::Uuid;
 
 use teloxide::prelude::*;
 use teloxide::dispatching::dialogue::InMemStorage;

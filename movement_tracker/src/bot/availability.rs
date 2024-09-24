@@ -1,16 +1,15 @@
 use std::cmp::{max, min};
-use std::str::FromStr;
 
 use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
-use sqlx::{Error, PgPool};
+use sqlx::PgPool;
 
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 
 use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
-use crate::types::{Availability, AvailabilityDetails, Ict, RoleType, UsrType};
+use crate::types::{Availability, AvailabilityDetails, Ict, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::utils::generate_prefix;
 

@@ -1,7 +1,4 @@
-use std::str::FromStr;
-
 use sqlx::PgPool;
-use sqlx::types::Uuid;
 
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};

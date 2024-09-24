@@ -1,4 +1,4 @@
-use sqlx::migrate::{MigrateDatabase, MigrateError, Migrator};
+use sqlx::migrate::{MigrateDatabase, Migrator};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres};
 use std::env;

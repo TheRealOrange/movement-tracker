@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use chrono::{Datelike, Duration, Local, NaiveDate};
 
 use sqlx::PgPool;
