@@ -15,12 +15,21 @@ use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
+use strum_macros::Display;
 use callback_data::CallbackData;
 use callback_data::CallbackDataHandler;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Display)]
+pub enum AvailabilityAction {
+    #[strum(serialize = "modify availability")]
+    Modify,
+    #[strum(serialize = "delete availability")]
+    Delete
+}
+
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum AvailabilityCallbacks {
+enum AvailabilityCallbacks {
     // Option Actions
     Add,
     Modify,
@@ -28,8 +37,8 @@ pub enum AvailabilityCallbacks {
     Back,
     
     // Pagination Actions
-    Prev,
-    Next,
+    Prev { action: AvailabilityAction },
+    Next { action: AvailabilityAction },
     
     // Modify Actions
     ChangeType,
@@ -44,7 +53,7 @@ pub enum AvailabilityCallbacks {
     Cancel,
 
     // Select Availability entry associated UUID
-    Select { id: Uuid },
+    Select { id: Uuid, action: AvailabilityAction },
 
     // Confirmation Actions
     ConfirmYes,
@@ -56,6 +65,7 @@ fn get_availability_edit_keyboard(
     prefix: &String,
     start: usize,
     show: usize,
+    action: &AvailabilityAction
 ) -> Result<InlineKeyboardMarkup, ()> {
     let slice_end = min(start + show, availability.len());
     let shown_entries = match availability.get(start..slice_end) {
@@ -93,7 +103,7 @@ fn get_availability_edit_keyboard(
             if entry.is_valid {
                 Some(vec![InlineKeyboardButton::callback(
                     formatted,
-                    AvailabilityCallbacks::Select { id: entry.id }.to_callback_data(&prefix),
+                    AvailabilityCallbacks::Select { id: entry.id, action: action.clone() }.to_callback_data(&prefix),
                 )])
             } else {
                 None
@@ -104,10 +114,10 @@ fn get_availability_edit_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbacks::Prev.to_callback_data(&prefix)));
+        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbacks::Prev { action: action.clone() }.to_callback_data(&prefix)));
     }
     if slice_end < availability.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbacks::Next.to_callback_data(&prefix)));
+        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbacks::Next { action: action.clone() }.to_callback_data(&prefix)));
     }
     pagination.push(InlineKeyboardButton::callback("DONE", AvailabilityCallbacks::Done.to_callback_data(&prefix)));
 
@@ -121,7 +131,7 @@ fn get_availability_edit_text(
     availability: &Vec<Availability>,
     start: usize,
     show: usize,
-    action: &String,
+    action: &AvailabilityAction,
 ) -> String {
     // Prepare the message text
     let slice_end = min(start + show, availability.len());
@@ -129,7 +139,7 @@ fn get_availability_edit_text(
         "Showing availability {} to {}, choose one to {}",
         start + 1,
         slice_end,
-        action.to_lowercase()
+        action
     );
 
     message_text
@@ -195,11 +205,11 @@ async fn update_availability_edit(
     prefix: &String,
     start: usize,
     show: usize,
-    action: &String,
+    action: &AvailabilityAction,
     msg_id: &Option<MessageId>
 ) -> Result<Option<MessageId>, ()> {
     // Generate the inline keyboard
-    let markup = match get_availability_edit_keyboard(availability, prefix, start, show) {
+    let markup = match get_availability_edit_keyboard(availability, prefix, start, show, action) {
         Ok(kb) => kb,
         Err(_) => {
             send_msg(
@@ -235,7 +245,7 @@ async fn handle_re_show_options(
     prefix: String,
     start: usize,
     show: usize,
-    action: String,
+    action: AvailabilityAction,
     msg_id: Option<MessageId>
 ) -> HandlerResult {
     match update_availability_edit(&bot, dialogue.chat_id(), username, &availability_list, &prefix, start, show, &action, &msg_id).await {
@@ -245,7 +255,7 @@ async fn handle_re_show_options(
                 None => dialogue.update(State::ErrorState).await?,
                 Some(msg_id) => {
                     log::debug!("Transitioning to AvailabilitySelect with MsgId: {:?}, Availability: {:?}, Action: {:?}, Prefix: {:?}, Start: {:?}", msg_id, availability_list, action, prefix, start);
-                    dialogue.update(State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }).await?
+                    dialogue.update(State::AvailabilitySelect { msg_id, availability_list, prefix, start }).await?
                 }
             }
         }
@@ -343,7 +353,7 @@ async fn delete_availability_entry_and_go_back(
     availability_entry: Availability,
     start: usize,
     show: usize,
-    action: String,
+    action: AvailabilityAction,
     pool: &PgPool,
     msg_id: Option<MessageId>
 ) -> HandlerResult {
@@ -404,7 +414,7 @@ async fn handle_go_back(
     tele_id: u64,
     start: usize,
     show: usize,
-    action: String,
+    action: AvailabilityAction,
     pool: &PgPool,
     msg_id: Option<MessageId>
 ) -> HandlerResult {
@@ -441,7 +451,7 @@ async fn modify_availability_and_go_back(
     availability_entry: Availability,
     start: usize,
     show: usize,
-    action: String,
+    action: AvailabilityAction,
     ict_type_edit: Option<Ict>,
     remark_edit: Option<String>,
     pool: &PgPool,
@@ -458,7 +468,7 @@ async fn modify_availability_and_go_back(
                         return Ok(());
                     }
                 };
-                
+
                 match controllers::scheduling::edit_avail_by_uuid(&pool, availability_entry.id, None, ict_type_edit, remark_edit).await {
                     Ok(updated) => {
                         // Build a list of changes
@@ -492,7 +502,7 @@ async fn modify_availability_and_go_back(
                         } else {
                             changes.join("\n")
                         };
-                        
+
                         notifier::emit::availability_notifications(
                             &bot,
                             format!(
@@ -652,11 +662,9 @@ pub(super) async fn availability_view(
         }
         AvailabilityCallbacks::Modify => {
             // Determine the action based on the enum
-            let action = "MODIFY_AVAILABILITY".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, AvailabilityAction::Modify, Some(msg_id)).await?;
         } AvailabilityCallbacks::Delete => {
-            let action = "DELETE_AVAILABILITY".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, action, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, start, show, AvailabilityAction::Delete, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::Done => {
             log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
@@ -1031,7 +1039,7 @@ pub(super) async fn availability_add_complete(
 pub(super) async fn availability_select(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, availability_list, action, prefix, start): (MessageId, Vec<Availability>, String, String, usize),
+    (msg_id, availability_list, prefix, start): (MessageId, Vec<Availability>, String, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
@@ -1039,7 +1047,6 @@ pub(super) async fn availability_select(
         dialogue.chat_id(), "availability_modify", "Callback", q,
         "MessageId" => msg_id,
         "Availability" => availability_list,
-        "Action" => action,
         "Prefix" => prefix,
         "Start" => start
     );
@@ -1062,10 +1069,10 @@ pub(super) async fn availability_select(
     };
     
     match callback {
-        AvailabilityCallbacks::Prev => {
+        AvailabilityCallbacks::Prev { action } => {
             handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 -8) as usize, 8, action, Some(msg_id)).await?;
         }
-        AvailabilityCallbacks::Next => {
+        AvailabilityCallbacks::Next { action } => {
             let entries_len = availability_list.len();
             handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, Some(msg_id)).await?;
         }
@@ -1084,28 +1091,29 @@ pub(super) async fn availability_select(
             ).await;
             dialogue.update(State::Start).await?
         }
-        AvailabilityCallbacks::Select { id: parsed_id } => {
+        AvailabilityCallbacks::Select { id: parsed_id, action } => {
             match controllers::scheduling::get_availability_by_uuid(&pool, parsed_id).await {
                 Ok(availability_entry) => {
-                    if action == "MODIFY_AVAILABILITY" {
-                        match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, &prefix, msg_id).await {
-                            None => dialogue.update(State::ErrorState).await?,
-                            Some(msg_id) => {
-                                log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
-                                dialogue.update(State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }).await?;
-                            }
-                        };
-                    } else if action == "DELETE_AVAILABILITY" {
-                        if availability_entry.planned {
-                            match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry, &prefix).await {
+                    match action {
+                        AvailabilityAction::Modify => {
+                            match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, &prefix, msg_id).await {
                                 None => dialogue.update(State::ErrorState).await?,
-                                Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
-                            }
-                        } else {
-                            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+                                Some(msg_id) => {
+                                    log::debug!("Transitioning to AvailabilityModify with MessageId: {:?}, Availability: {:?}, Action: {:?}, Start: {:?}", msg_id, availability_entry, action, start);
+                                    dialogue.update(State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }).await?;
+                                }
+                            };
                         }
-                    } else {
-                        dialogue.update(State::ErrorState).await?;
+                        AvailabilityAction::Delete => {
+                            if availability_entry.planned {
+                                match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), &availability_entry, &prefix).await {
+                                    None => dialogue.update(State::ErrorState).await?,
+                                    Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
+                                }
+                            } else {
+                                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+                            }
+                        }
                     }
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
@@ -1125,7 +1133,7 @@ pub(super) async fn availability_select(
 pub(super) async fn availability_modify(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, String, usize),
+    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, AvailabilityAction, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
@@ -1201,7 +1209,7 @@ pub(super) async fn availability_modify(
 pub(super) async fn availability_modify_remarks(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, change_msg_id, availability_entry, action, start): (MessageId, MessageId, Availability, String, usize),
+    (msg_id, change_msg_id, availability_entry, action, start): (MessageId, MessageId, Availability, AvailabilityAction, usize),
     msg: Message,
     pool: PgPool
 ) -> HandlerResult {
@@ -1241,7 +1249,7 @@ pub(super) async fn availability_modify_remarks(
 pub(super) async fn availability_modify_type(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, prefix, change_msg_id, availability_entry, action, start): (MessageId, String, MessageId, Availability, String, usize),
+    (msg_id, prefix, change_msg_id, availability_entry, action, start): (MessageId, String, MessageId, Availability, AvailabilityAction, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {
@@ -1302,7 +1310,7 @@ pub(super) async fn availability_modify_type(
 pub(super) async fn availability_delete_confirm(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, String, usize),
+    (msg_id, prefix, availability_entry, action, start): (MessageId, String, Availability, AvailabilityAction, usize),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {

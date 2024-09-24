@@ -19,7 +19,7 @@ use callback_data::CallbackDataHandler;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum NotifyCallbackData {
+enum NotifyCallbackData {
     // Pagination Actions
     SystemNotification { enable: bool },
     RegisterNotification { enable: bool },

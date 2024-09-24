@@ -19,7 +19,7 @@ use callback_data::CallbackDataHandler;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum ForecastCallbackData {
+enum ForecastCallbackData {
     // View range Actions
     ViewNextWeek,
     ViewOneMonth,

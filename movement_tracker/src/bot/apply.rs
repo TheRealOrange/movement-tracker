@@ -455,6 +455,7 @@ pub(super) async fn apply_edit_prompt(
                                 },
                                 Err(_) => { "" .into() }
                             };
+                            
                             notifier::emit::system_notifications(
                                 &bot,
                                 format!(
@@ -781,7 +782,8 @@ pub(super) async fn apply_edit_role(
         ApplyCallbacks::SelectRoleType { role_type: role_type_enum } => {
             log::debug!("Selected role type: {:?}", role_type_enum);
             send_msg(
-                bot.send_message(dialogue.chat_id(), format!("Selected role type: {}", role_type_enum.as_ref())),
+                bot.send_message(dialogue.chat_id(), format!("Selected role type: `{}`", utils::escape_special_characters(&role_type_enum.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
                 &q.from.username,
             ).await;
 
@@ -839,7 +841,8 @@ pub(super) async fn apply_edit_type(
         ApplyCallbacks::SelectUserType { user_type: user_type_enum } => {
             log::debug!("Selected user type: {:?}", user_type_enum);
             send_msg(
-                bot.send_message(dialogue.chat_id(), format!("Selected user type: {}", user_type_enum.as_ref())),
+                bot.send_message(dialogue.chat_id(), format!("Selected user type: `{}`", utils::escape_special_characters(&user_type_enum.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
                 &q.from.username,
             ).await;
 

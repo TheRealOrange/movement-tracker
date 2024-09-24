@@ -11,8 +11,8 @@ use teloxide::prelude::*;
 use teloxide::types::{ChatKind, MessageId, ReplyParameters};
 use uuid::Uuid;
 use super::register::{register, register_complete, register_name, register_ops_name, register_role, register_type};
-use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_type, user_select};
-use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_delete_confirm, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view};
+use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_role, user_edit_type, user_select};
+use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_delete_confirm, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view, AvailabilityAction};
 use crate::bot::forecast::{forecast, forecast_view};
 use crate::bot::plan::{plan, plan_select, plan_view};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
@@ -116,7 +116,6 @@ pub(super) enum State {
     AvailabilitySelect {
         msg_id: MessageId,
         availability_list: Vec<Availability>,
-        action: String,
         prefix: String,
         start: usize
     },
@@ -124,7 +123,7 @@ pub(super) enum State {
         msg_id: MessageId,
         prefix: String,
         availability_entry: Availability,
-        action: String,
+        action: AvailabilityAction,
         start: usize
     },
     AvailabilityModifyType {
@@ -132,21 +131,21 @@ pub(super) enum State {
         prefix: String,
         change_msg_id: MessageId,
         availability_entry: Availability,
-        action: String,
+        action: AvailabilityAction,
         start: usize
     },
     AvailabilityModifyRemarks {
         msg_id: MessageId,
         change_msg_id: MessageId,
         availability_entry: Availability,
-        action: String,
+        action: AvailabilityAction,
         start: usize
     },
     AvailabilityDeleteConfirm {
         msg_id: MessageId,
         prefix: String,
         availability_entry: Availability,
-        action: String,
+        action: AvailabilityAction,
         start: usize
     },
     AvailabilityAdd {
@@ -208,6 +207,12 @@ pub(super) enum State {
         user_details: Usr,
         prefix: String
     },
+    UserEditRole {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
+        user_details: Usr,
+        prefix: String
+    },
     UserEditType {
         msg_id: MessageId,
         change_msg_id: MessageId,
@@ -245,7 +250,7 @@ pub(super) enum State {
         start: usize,
         action: String
     },
-// States meant for editing the notification settings
+    // States meant for editing the notification settings
     NotifySettings {
         notification_settings: NotificationSettings,
         chat_id: ChatId,
@@ -314,6 +319,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::ApplyEditType { msg_id, prefix, change_msg_id, application, admin }].endpoint(press_button_prompt))
         .branch(case![State::ApplyEditAdmin { msg_id, prefix, change_msg_id, application, admin }].endpoint(press_button_prompt))
         .branch(case![State::UserEdit { msg_id, user_details, prefix }].endpoint(press_button_prompt))
+        .branch(case![State::UserEditRole { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
@@ -322,7 +328,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
@@ -342,6 +348,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::ApplyEditType { msg_id, prefix, change_msg_id, application, admin }].endpoint(apply_edit_type))
             .branch(case![State::ApplyEditAdmin { msg_id, prefix, change_msg_id, application, admin }].endpoint(apply_edit_admin))
             .branch(case![State::UserEdit { msg_id, user_details, prefix }].endpoint(user_edit_prompt))
+            .branch(case![State::UserEditRole { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_role))
             .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_delete))
@@ -351,7 +358,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
         )
         .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(availability_view))
-        .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start }].endpoint(availability_select))
         .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(availability_modify))
         .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { msg_id, prefix, avail_type }].endpoint(availability_add_callback))
@@ -377,7 +384,7 @@ async fn press_button_prompt(bot: Bot, msg: Message, dialogue: MyDialogue) -> Ha
     };
     
     send_msg(
-        bot.send_message(user.id, "Please press a button"),
+        bot.send_message(user.id, "Please press a button, or type /cancel to abort."),
         &(user.username)
     ).await;
     

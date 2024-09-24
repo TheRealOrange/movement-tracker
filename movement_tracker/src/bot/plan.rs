@@ -22,7 +22,7 @@ use callback_data::CallbackDataHandler;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum PlanCallbacks {
+enum PlanCallbacks {
     // Pagination Actions
     Prev,
     Next,
@@ -911,7 +911,7 @@ pub(super) async fn plan_view(
                 }
                 None => {
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), "Invalid option."),
+                        bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                         &q.from.username,
                     ).await;
                     handle_re_show_options(
@@ -924,7 +924,7 @@ pub(super) async fn plan_view(
         }
         _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                 &q.from.username,
             ).await;
         }

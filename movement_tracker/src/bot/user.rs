@@ -1,34 +1,74 @@
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
-use crate::bot::state::State;
-use crate::types::{UserInfo, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
-use sqlx::PgPool;
 use std::str::FromStr;
 use chrono::Local;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
-use strum::IntoEnumIterator;
+
+use sqlx::PgPool;
+
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
 
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use crate::bot::state::State;
+use crate::types::{RoleType, UserInfo, Usr, UsrType};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
+
+use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
+use strum_macros::EnumProperty;
+use uuid::Uuid;
+use callback_data::{CallbackData, CallbackDataHandler};
+use crate::utils::generate_prefix;
+
+// Represents callback actions with optional associated data.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
+enum UserEditCallbacks {
+    // Completion Actions
+    Done,
+    Delete,
+    Cancel,
+
+    // Edit field Actions
+    Name,
+    OpsName,
+    RoleType,
+    UserType,
+    Admin,
+
+    // Role and User type selection Actions
+    SelectRoleType { role_type: RoleType },
+    SelectUserType { user_type: UsrType },
+
+    // Select Admin Yes/No Actions
+    AdminYes,
+    AdminNo,
+
+    // Delete confirmation Actions
+    DeleteYes,
+    DeleteNo
+}
+
 fn get_inline_keyboard(is_last_admin: bool, prefix: &String) -> InlineKeyboardMarkup {
-    let mut options: Vec<Vec<InlineKeyboardButton>> = ["NAME", "OPS NAME", "TYPE"]
+    let mut options: Vec<Vec<InlineKeyboardButton>> = [
+        ("NAME", UserEditCallbacks::Name),
+        ("OPS NAME", UserEditCallbacks::OpsName),
+        ("ROLE", UserEditCallbacks::RoleType),
+        ("TYPE", UserEditCallbacks::UserType)
+    ]
         .into_iter()
-        .map(|option| vec![InlineKeyboardButton::callback(option, format!("{}{}",prefix,option))])
+        .map(|(text, data)| vec![InlineKeyboardButton::callback(text, data.to_callback_data(&prefix))])
         .collect();
 
     // Conditionally add the "ADMIN" button
     if !is_last_admin {
-        options.push(vec![InlineKeyboardButton::callback("ADMIN", format!("{}{}",prefix,"ADMIN"))]);
+        options.push(vec![InlineKeyboardButton::callback("ADMIN", UserEditCallbacks::Admin.to_callback_data(&prefix))]);
     }
 
-    let mut confirm_row: Vec<InlineKeyboardButton> = ["DONE", "CANCEL"]
+    let mut confirm_row: Vec<InlineKeyboardButton> = [("DONE", UserEditCallbacks::Done), ("CANCEL", UserEditCallbacks::Cancel)]
         .into_iter()
-        .map(|option| InlineKeyboardButton::callback(option, format!("{}{}",prefix,option)))
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
         .collect();
 
     if !is_last_admin {
-        confirm_row.push(InlineKeyboardButton::callback("DELETE", format!("{}{}",prefix,"DELETE")));
+        confirm_row.push(InlineKeyboardButton::callback("DELETE", UserEditCallbacks::Delete.to_callback_data(&prefix)));
     }
 
     // Add the confirmation row to the options
@@ -63,13 +103,24 @@ async fn display_user_edit_prompt(
     send_or_edit_msg(&bot, chat_id, username, msg_id, get_user_edit_text(user_details), Some(get_inline_keyboard(is_last_admin, prefix)), Some(ParseMode::MarkdownV2)).await
 }
 
-async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
+async fn display_edit_user_types(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
     let usrtypes = UsrType::iter()
-        .map(|usrtype| InlineKeyboardButton::callback(usrtype.as_ref(), usrtype.as_ref()));
+        .map(|usrtype| InlineKeyboardButton::callback(usrtype.clone().as_ref(), UserEditCallbacks::SelectUserType { user_type: usrtype }.to_callback_data(&prefix)));
 
     send_msg(
         bot.send_message(chat_id, "Select user type:")
             .reply_markup(InlineKeyboardMarkup::new([usrtypes])),
+        username
+    ).await
+}
+
+async fn display_edit_role_types(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
+    let role_types = RoleType::iter()
+        .map(|roletype| InlineKeyboardButton::callback(roletype.clone().as_ref(), UserEditCallbacks::SelectRoleType { role_type: roletype }.to_callback_data(&prefix)));
+
+    send_msg(
+        bot.send_message(chat_id, "Select role type:")
+            .reply_markup(InlineKeyboardMarkup::new([role_types])),
         username
     ).await
 }
@@ -88,9 +139,9 @@ async fn display_edit_ops_name(bot: &Bot, chat_id: ChatId, username: &Option<Str
     ).await
 }
 
-async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
-    let confirm = ["YES", "NO"]
-        .map(|product| InlineKeyboardButton::callback(product, product));
+async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
+    let confirm = [("YES", UserEditCallbacks::AdminYes), ("NO", UserEditCallbacks::AdminNo)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)));
 
     send_msg(
         bot.send_message(chat_id, "Make user admin?")
@@ -99,9 +150,9 @@ async fn display_edit_admin(bot: &Bot, chat_id: ChatId, username: &Option<String
     ).await
 }
 
-async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
-    let confirm = ["YES", "NO"]
-        .map(|product| InlineKeyboardButton::callback(product, product));
+async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
+    let confirm = [("YES", UserEditCallbacks::DeleteYes), ("NO", UserEditCallbacks::DeleteNo)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)));
 
     send_msg(
         bot.send_message(chat_id, "Delete user? (they will have to re-register)")
@@ -229,11 +280,7 @@ async fn handle_ops_name_input(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, 
                 match controllers::user::get_user_by_ops_name(&pool, cleaned_ops_name.as_ref()).await {
                     Ok(user_details) => {
                         // Generate random prefix to make the IDs only applicable to this dialogue instance
-                        let prefix: String = rand::thread_rng()
-                            .sample_iter(&Alphanumeric)
-                            .take(5)
-                            .map(char::from)
-                            .collect();
+                        let prefix = generate_prefix();
 
                         let is_last_admin = match controllers::user::is_last_admin(&pool, user_details.id).await {
                             Ok(is_last_admin) => is_last_admin,
@@ -335,185 +382,184 @@ pub(super) async fn user_edit_prompt(
         "Prefix" => prefix
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
-            send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &q.from.username,
-            ).await;
-        }
-        Some(callback_data) => {
-            match callback_data.strip_prefix(&prefix) {
-                Some(option) => {
-                    match option {
-                        "DONE" => {
-                            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
-                            let original_user = match controllers::user::get_user_by_uuid(&pool, user_details.id).await {
-                                Ok(user) => user,
-                                Err(_) => {
-                                    handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
-                                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                                    return Ok(());
-                                }
-                            };
-                            match controllers::user::update_user(
-                                &pool,
-                                &user_details
-                            ).await {
-                                Ok(user_updated) => {
-                                    // Build a list of changes
-                                    let mut changes = Vec::new();
-
-                                    if original_user.name != user_updated.name {
-                                        changes.push(format!(
-                                            "*Name:* {} ➡️ {}",
-                                            original_user.name,
-                                            user_updated.name
-                                        ));
-                                    }
-
-                                    if original_user.ops_name != user_updated.ops_name {
-                                        changes.push(format!(
-                                            "*OPS Name:* `{}` ➡️ `{}`",
-                                            original_user.ops_name,
-                                            user_updated.ops_name
-                                        ));
-                                    }
-
-                                    if original_user.role_type != user_updated.role_type {
-                                        changes.push(format!(
-                                            "*Role:* `{:?}` ➡️ `{:?}`",
-                                            original_user.role_type,
-                                            user_updated.role_type
-                                        ));
-                                    }
-
-                                    if original_user.usr_type != user_updated.usr_type {
-                                        changes.push(format!(
-                                            "*Type:* `{:?}` ➡️ `{:?}`",
-                                            original_user.usr_type,
-                                            user_updated.usr_type
-                                        ));
-                                    }
-
-                                    if original_user.admin != user_updated.admin {
-                                        changes.push(format!(
-                                            "*Admin Status:* {} ➡️ {}",
-                                            if original_user.admin { "YES" } else { "NO" },
-                                            if user_updated.admin { "YES" } else { "NO" }
-                                        ));
-                                    }
-
-                                    // Combine all changes into a single message
-                                    let changes_message = if changes.is_empty() {
-                                        "No changes were made\\.".to_string()
-                                    } else {
-                                        changes.join("\n")
-                                    };
-
-                                    if !changes.is_empty() {
-                                        // Emit system notification with the changes
-                                        notifier::emit::system_notifications(
-                                            &bot,
-                                            &format!(
-                                                "{} has amended user details for *{}*:\n{}",
-                                                utils::username_link_tag(&q.from),
-                                                utils::escape_special_characters(&user_details.ops_name),
-                                                changes_message
-                                            ),
-                                            &pool,
-                                            q.from.id.0 as i64
-                                        ).await;
-                                    }
-
-                                    send_msg(
-                                        bot.send_message(dialogue.chat_id(), format!(
-                                            "Updated user details:\n{}\nADDED: _{}_\nUPDATED: _{}_",
-                                            changes_message,
-                                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string()),
-                                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string())
-                                        )).parse_mode(ParseMode::MarkdownV2),
-                                        &q.from.username,
-                                    ).await;
-
-                                    // Inform users if their admin status changed
-                                    if user_updated.admin != original_user.admin {
-                                        send_msg(
-                                            bot.send_message(ChatId(user_updated.tele_id),
-                                                             format!("{} Use /help to see available actions.",
-                                                                     if user_updated.admin { "You are now an admin. Use /notify to configure notifications." } else { "You are no longer an admin." }
-                                                             ), ),
-                                            &q.from.username,
-                                        ).await;
-                                    }
-
-                                    dialogue.update(State::Start).await?;
-                                }
-                                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
-                            }
-                        }
-                        "DELETE" => {
-                            match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username).await {
-                                None => dialogue.update(State::ErrorState).await?,
-                                Some(change_msg_id) => dialogue.update(State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }).await?
-                            };
-                        }
-                        "CANCEL" => {
-                            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                                &q.from.username,
-                            ).await;
-                            dialogue.update(State::Start).await?
-                        }
-                        "NAME" => {
-                            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                            match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
-                                None => dialogue.update(State::ErrorState).await?,
-                                Some(change_msg_id) => dialogue.update(State::UserEditName { msg_id, change_msg_id, user_details, prefix }).await?
-                            };
-                        }
-                        "OPS NAME" => {
-                            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                            match display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await {
-                                None => dialogue.update(State::ErrorState).await?,
-                                Some(change_msg_id) => dialogue.update(State::UserEditOpsName { msg_id, change_msg_id, user_details, prefix }).await?
-                            };
-                        }
-                        "TYPE" => {
-                            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                            match display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username).await {
-                                None => dialogue.update(State::ErrorState).await?,
-                                Some(change_msg_id) => dialogue.update(State::UserEditType { msg_id, change_msg_id, user_details, prefix }).await?
-                            };
-                        }
-                        "ADMIN" => {
-                            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                            match display_edit_admin(&bot, dialogue.chat_id(), &q.from.username).await {
-                                None => dialogue.update(State::ErrorState).await?,
-                                Some(change_msg_id) => dialogue.update(State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }).await?
-                            };
-                        }
-                        _ => {
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                                &q.from.username,
-                            ).await;
-                        }
-                    }
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        UserEditCallbacks::Done => {
+            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
+            let original_user = match controllers::user::get_user_by_uuid(&pool, user_details.id).await {
+                Ok(user) => user,
+                Err(_) => {
+                    handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                    return Ok(());
                 }
-                None => {
+            };
+            match controllers::user::update_user(
+                &pool,
+                &user_details
+            ).await {
+                Ok(user_updated) => {
+                    // Build a list of changes
+                    let mut changes = Vec::new();
+
+                    if original_user.name != user_updated.name {
+                        changes.push(format!(
+                            "*Name:* {} ➡️ {}",
+                            original_user.name,
+                            user_updated.name
+                        ));
+                    }
+
+                    if original_user.ops_name != user_updated.ops_name {
+                        changes.push(format!(
+                            "*OPS Name:* `{}` ➡️ `{}`",
+                            original_user.ops_name,
+                            user_updated.ops_name
+                        ));
+                    }
+
+                    if original_user.role_type != user_updated.role_type {
+                        changes.push(format!(
+                            "*Role:* `{:?}` ➡️ `{:?}`",
+                            original_user.role_type,
+                            user_updated.role_type
+                        ));
+                    }
+
+                    if original_user.usr_type != user_updated.usr_type {
+                        changes.push(format!(
+                            "*Type:* `{:?}` ➡️ `{:?}`",
+                            original_user.usr_type,
+                            user_updated.usr_type
+                        ));
+                    }
+
+                    if original_user.admin != user_updated.admin {
+                        changes.push(format!(
+                            "*Admin Status:* {} ➡️ {}",
+                            if original_user.admin { "YES" } else { "NO" },
+                            if user_updated.admin { "YES" } else { "NO" }
+                        ));
+                    }
+
+                    // Combine all changes into a single message
+                    let changes_message = if changes.is_empty() {
+                        "No changes were made\\.".to_string()
+                    } else {
+                        changes.join("\n")
+                    };
+
+                    if !changes.is_empty() {
+                        // Emit system notification with the changes
+                        notifier::emit::system_notifications(
+                            &bot,
+                            &format!(
+                                "{} has amended user details for *{}*:\n{}",
+                                utils::username_link_tag(&q.from),
+                                utils::escape_special_characters(&user_details.ops_name),
+                                changes_message
+                            ),
+                            &pool,
+                            q.from.id.0 as i64
+                        ).await;
+                    }
+
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), "Invalid option."),
+                        bot.send_message(dialogue.chat_id(), format!(
+                            "Updated user details:\n{}\nADDED: _{}_\nUPDATED: _{}_",
+                            changes_message,
+                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string()),
+                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string())
+                        )).parse_mode(ParseMode::MarkdownV2),
                         &q.from.username,
                     ).await;
+
+                    // Inform users if their admin status changed
+                    if user_updated.admin != original_user.admin {
+                        send_msg(
+                            bot.send_message(ChatId(user_updated.tele_id),
+                                             format!("{} Use /help to see available actions.",
+                                                     if user_updated.admin { "You are now an admin. Use /notify to configure notifications." } else { "You are no longer an admin." }
+                                             ), ),
+                            &q.from.username,
+                        ).await;
+                    }
+
+                    dialogue.update(State::Start).await?;
                 }
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
+        }
+        UserEditCallbacks::Delete => {
+            match display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        UserEditCallbacks::Cancel => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
+                &q.from.username,
+            ).await;
+            dialogue.update(State::Start).await?
+        }
+        UserEditCallbacks::Name => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_name(&bot, dialogue.chat_id(), &q.from.username).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditName { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        UserEditCallbacks::OpsName => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_ops_name(&bot, dialogue.chat_id(), &q.from.username).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditOpsName { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        UserEditCallbacks::RoleType => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_role_types(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditRole { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        UserEditCallbacks::UserType => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_user_types(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditType { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        UserEditCallbacks::Admin => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            match display_edit_admin(&bot, dialogue.chat_id(), &q.from.username, &prefix).await {
+                None => dialogue.update(State::ErrorState).await?,
+                Some(change_msg_id) => dialogue.update(State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }).await?
+            };
+        }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
 
@@ -627,6 +673,62 @@ pub(super) async fn user_edit_ops_name(
     Ok(())
 }
 
+pub(super) async fn user_edit_role(
+    bot: Bot,
+    dialogue: MyDialogue,
+    (msg_id, change_msg_id, mut user_details, prefix): (MessageId, MessageId, Usr, String),
+    q: CallbackQuery,
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(
+        dialogue.chat_id(), "user_edit_role", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
+        "User Details" => user_details,
+        "Prefix" => prefix
+    );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+
+    match callback {
+        UserEditCallbacks::SelectRoleType { role_type: role_type_enum } => {
+            log::debug!("Selected role type: {:?}", role_type_enum);
+            send_msg(
+                bot.send_message(dialogue.chat_id(), format!("Selected role type: `{}`", utils::escape_special_characters(&role_type_enum.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
+                &q.from.username,
+            ).await;
+
+            user_details.role_type = role_type_enum;
+            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+            handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
+        }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
+        }
+    }
+
+    Ok(())
+}
+
 pub(super) async fn user_edit_type(
     bot: Bot,
     dialogue: MyDialogue,
@@ -642,40 +744,41 @@ pub(super) async fn user_edit_type(
         "Prefix" => prefix
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        UserEditCallbacks::SelectUserType { user_type: user_type_enum } => {
+            log::debug!("Selected user type: {:?}", user_type_enum);
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), format!("Selected user type: `{}`", utils::escape_special_characters(&user_type_enum.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
                 &q.from.username,
             ).await;
-        }
-        Some(usrtype) => {
-            log::debug!("Received input: {:?}", &usrtype);
-            match UsrType::from_str(&usrtype) {
-                Ok(user_type_enum) => {
-                    log::debug!("Selected user type: {:?}", user_type_enum);
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), format!("Selected user type: {}", user_type_enum.as_ref())),
-                        &q.from.username,
-                    ).await;
 
-                    user_details.usr_type = user_type_enum;
-                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                    handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
-                }
-                Err(e) => {
-                    log::error!("Invalid role type received: {}", e);
-                    send_msg(
-                        bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
-                        &q.from.username,
-                    ).await;
-                }
-            }
+            user_details.usr_type = user_type_enum;
+            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+            handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
+        }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
         }
     }
 
@@ -697,37 +800,40 @@ pub(super) async fn user_edit_admin(
         "Prefix" => prefix
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        UserEditCallbacks::AdminYes => {
+            user_details.admin = true;
+        }
+        UserEditCallbacks::AdminNo => {
+            user_details.admin = false;
+        }
+        _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                 &q.from.username,
             ).await;
-        }
-        Some(make_admin_input) => {
-            log::debug!("Received input: {:?}", &make_admin_input);
-            if make_admin_input == "YES" {
-                user_details.admin = true;
-            } else if make_admin_input == "NO" {
-                user_details.admin = false;
-            } else {
-                log::error!("Invalid set admin input received: {}", make_admin_input);
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
-                    &q.from.username,
-                ).await;
-                return Ok(())
-            }
-
-            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-            handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
+            return Ok(());
         }
     }
+    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+    handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
 
     Ok(())
 }
@@ -747,74 +853,76 @@ pub(super) async fn user_edit_delete(
         "Prefix" => prefix
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
-            send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &q.from.username,
-            ).await;
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
 
-            display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username).await;
-        }
-        Some(make_admin_input) => {
-            log::debug!("Received input: {:?}", &make_admin_input);
-            if make_admin_input == "YES" {
-                match controllers::user::remove_user_by_uuid(&pool, user_details.id).await {
-                    Ok(success) => {
-                        log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                        if success {
-                            // Emit system notification to indicate who has deleted the user
-                            notifier::emit::system_notifications(
-                                &bot,
-                                format!(
-                                    "{} has deleted the user:\nOPS NAME: {}\nNAME: {}",
-                                    utils::username_link_tag(&q.from),
-                                    user_details.ops_name,
-                                    format!("[{}](tg://user?id={})", user_details.name, user_details.tele_id as u64)
-                                ).as_str(),
-                                &pool,
-                                q.from.id.0 as i64
-                            ).await;
+    match callback {
+        UserEditCallbacks::DeleteYes => {
+            match controllers::user::remove_user_by_uuid(&pool, user_details.id).await {
+                Ok(success) => {
+                    log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                    if success {
+                        // Emit system notification to indicate who has deleted the user
+                        notifier::emit::system_notifications(
+                            &bot,
+                            format!(
+                                "{} has deleted the user:\nOPS NAME: `{}`\nNAME: *{}*",
+                                utils::username_link_tag(&q.from),
+                                utils::escape_special_characters(&user_details.ops_name),
+                                format!("[{}](tg://user?id={})", utils::escape_special_characters(&user_details.name), user_details.tele_id as u64)
+                            ).as_str(),
+                            &pool,
+                            q.from.id.0 as i64
+                        ).await;
 
-                            send_msg(
-                                bot.send_message(ChatId(user_details.tele_id), "You have been deregistered."),
-                                &q.from.username,
-                            ).await;
-                            
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), format!("Successfully removed user: {}", user_details.ops_name)),
-                                &q.from.username
-                            ).await;
-                        } else {
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), format!("No such user: {}", user_details.ops_name)),
-                                &q.from.username
-                            ).await;
-                        }
+                        send_msg(
+                            bot.send_message(ChatId(user_details.tele_id), "You have been deregistered."),
+                            &q.from.username,
+                        ).await;
 
-                        dialogue.update(State::Start).await?;
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), format!("Successfully removed user: {}", user_details.ops_name)),
+                            &q.from.username
+                        ).await;
+                    } else {
+                        send_msg(
+                            bot.send_message(dialogue.chat_id(), format!("No such user: {}", user_details.ops_name)),
+                            &q.from.username
+                        ).await;
                     }
-                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+
+                    dialogue.update(State::Start).await?;
                 }
-            } else if make_admin_input == "NO" {
-                log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
-            } else {
-                log::error!("Invalid delete confirmation input received: {}", make_admin_input);
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Please select an option or type /cancel to abort"),
-                    &q.from.username,
-                ).await;
-                display_delete_confirmation(&bot, dialogue.chat_id(), &q.from.username).await;
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
+        UserEditCallbacks::DeleteNo => {
+            log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
+            handle_go_back(&bot, &dialogue, &q.from.username, user_details, &pool, prefix, msg_id).await?;
+        }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
+                &q.from.username,
+            ).await;
+            return Ok(());
+        }
     }
-
+    
     Ok(())
 }

@@ -16,7 +16,7 @@ use callback_data::{CallbackData, CallbackDataHandler};
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
-pub enum RegisterCallbackData {
+enum RegisterCallbackData {
     // Selection actions for role and user type
     SelectRoleType { role_type: RoleType },
     SelectUserType { user_type: UsrType },
@@ -169,7 +169,8 @@ pub(super) async fn register_role(
             log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
             log::debug!("Selected role: {:?}", role_type);
             send_msg(
-                bot.send_message(dialogue.chat_id(), format!("Selected role: `{}`", role_type.as_ref())).parse_mode(ParseMode::MarkdownV2),
+                bot.send_message(dialogue.chat_id(), format!("Selected role: `{}`", utils::escape_special_characters(&role_type.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
                 &q.from.username,
             ).await;
 
@@ -228,7 +229,8 @@ pub(super) async fn register_type(
             log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
             log::debug!("Selected user type: {:?}", user_type);
             send_msg(
-                bot.send_message(dialogue.chat_id(), format!("Selected user type: `{}`", user_type.as_ref())).parse_mode(ParseMode::MarkdownV2),
+                bot.send_message(dialogue.chat_id(), format!("Selected user type: `{}`", utils::escape_special_characters(&user_type.as_ref())))
+                    .parse_mode(ParseMode::MarkdownV2),
                 &q.from.username,
             ).await;
             match display_register_name(&bot, dialogue.chat_id(), &q.from.username).await {
@@ -469,7 +471,7 @@ pub(super) async fn register_complete(
         }
         _ => {
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
                 &q.from.username,
             ).await;
         }
