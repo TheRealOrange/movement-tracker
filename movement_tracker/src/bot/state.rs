@@ -213,7 +213,8 @@ pub(super) enum State {
     },
     // States meant for tracking saf100 issued
     Saf100Select {
-        msg_id: MessageId
+        msg_id: MessageId,
+        prefix: String
     },
     Saf100View {
         msg_id: MessageId,
@@ -225,7 +226,6 @@ pub(super) enum State {
     Saf100Confirm {
         msg_id: MessageId,
         availability: Availability,
-        availability_list: Vec<AvailabilityDetails>,
         prefix: String,
         start: usize,
         action: String
@@ -303,9 +303,9 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(press_button_prompt))
-        .branch(case![State::Saf100Select { msg_id }].endpoint(press_button_prompt))
+        .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
-        .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(press_button_prompt))
+        .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityModify { msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
@@ -331,9 +331,9 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(plan_view))
-            .branch(case![State::Saf100Select { msg_id }].endpoint(saf100_select))
+            .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(saf100_select))
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
-            .branch(case![State::Saf100Confirm { msg_id, availability, availability_list, prefix, start, action }].endpoint(saf100_confirm))
+            .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
         )
         .branch(case![State::AvailabilityView { msg_id, availability_list }].endpoint(availability_view))
         .branch(case![State::AvailabilitySelect { msg_id, availability_list, action, prefix, start }].endpoint(availability_select))

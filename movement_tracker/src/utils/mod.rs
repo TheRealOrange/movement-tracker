@@ -2,6 +2,8 @@ use chrono::{Datelike, Local, NaiveDate};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use rand::distributions::Alphanumeric;
+use rand::Rng;
 use teloxide::types::User;
 
 //Regular expressions for parsing different date formats
@@ -552,4 +554,13 @@ pub(crate) fn username_link_tag(user: &User) -> String{
         .as_deref()
         .map(|username| format!("@{}", escape_special_characters(&username)))  // Use @username if available
         .unwrap_or_else(|| format!("[{}](tg://user?id={})", escape_special_characters(&user.first_name), user.id))  // Use first name and user ID if no username
+}
+
+// Generates a random prefix for callback data
+pub(crate) fn generate_prefix() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(5)
+        .map(char::from)
+        .collect()
 }

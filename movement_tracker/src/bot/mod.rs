@@ -265,6 +265,20 @@ pub(self) async fn validate_ops_name(bot: &Bot, dialogue: &MyDialogue, username:
     }
 }
 
+async fn retrieve_callback_data(bot: &Bot, chat_id: ChatId, q: &CallbackQuery) -> Result<String, ()> {
+    // Extract the callback data
+    match q.data.as_ref() {
+        Some(d) => Ok(d.clone()),
+        None => {
+            send_msg(
+                bot.send_message(chat_id, "Invalid option."),
+                &q.from.username,
+            ).await;
+            Err(())
+        }
+    }
+}
+
 #[macro_export]
 macro_rules! log_endpoint_hit {
     ($chat_id:expr, $fn_name:expr) => {

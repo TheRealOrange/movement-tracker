@@ -50,7 +50,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && /app/movement-tracker"
+    command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && /app/movement_tracker"
     restart: always
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
