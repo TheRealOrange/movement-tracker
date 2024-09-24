@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                a.id,\n                a.usr_id AS user_id,\n                a.avail,\n                a.ict_type AS \"ict_type: _\",\n                a.remarks,\n                a.planned,\n                a.saf100,\n                a.attended,\n                a.is_valid,\n                a.created,\n                a.updated\n            FROM availability a\n            WHERE a.id = $1\n              AND a.is_valid = TRUE;\n            ",
+  "query": "\n                SELECT\n                    a.id,\n                    a.usr_id AS user_id,\n                    a.avail,\n                    a.ict_type AS \"ict_type: _\",\n                    a.remarks,\n                    a.planned,\n                    a.saf100,\n                    a.attended,\n                    a.is_valid,\n                    a.created,\n                    a.updated\n                FROM availability a\n                WHERE a.id = $1\n                  AND a.is_valid = TRUE;\n                ",
   "describe": {
     "columns": [
       {
@@ -89,5 +89,5 @@
       false
     ]
   },
-  "hash": "baec1ecfda068f96259d3673b25aee10e4087cdb5c4d3a0fbce90645423952a7"
+  "hash": "2a96df0e4e9ed1c636eb9d7bfb8ba0f94095304bb8da8578b880f07d32bc2ecc"
 }

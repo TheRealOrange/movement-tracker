@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            sn.id,\n            sn.avail_id,\n            sn.scheduled_time,\n            sn.sent,\n            sn.created,\n            sn.updated,\n            sn.is_valid\n        FROM scheduled_notifications sn\n        WHERE sn.scheduled_time <= NOW()\n          AND sn.sent = FALSE\n          AND sn.is_valid = TRUE\n        FOR UPDATE SKIP LOCKED;\n        ",
+  "query": "\n            SELECT\n                sn.id,\n                sn.avail_id,\n                sn.scheduled_time,\n                sn.sent,\n                sn.created,\n                sn.updated,\n                sn.is_valid\n            FROM scheduled_notifications sn\n            WHERE sn.scheduled_time <= NOW()\n              AND sn.sent = FALSE\n              AND sn.is_valid = TRUE\n            FOR UPDATE SKIP LOCKED;\n            ",
   "describe": {
     "columns": [
       {
@@ -52,5 +52,5 @@
       false
     ]
   },
-  "hash": "263330b8faac02b35ed02a35f6d683c69b8055ee5d72f6417fe383559112bf12"
+  "hash": "34080230eb0f62a60a9ff5fc4fe5a0209e2a9ade7c031309fc522e78e08c8fe2"
 }
