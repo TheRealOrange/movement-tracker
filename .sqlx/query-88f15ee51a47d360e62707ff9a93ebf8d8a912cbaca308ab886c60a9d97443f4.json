@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            availability.id,\n            usrs.ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            availability.avail,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.planned,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.tele_id = $1\n          AND availability.avail >= $2\n          AND (availability.is_valid = TRUE OR availability.planned = TRUE)\n        ORDER BY availability.avail ASC;\n        ",
+  "query": "\n        SELECT\n            availability.id,\n            usrs.ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            availability.avail,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.planned,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE\n          AND availability.avail >= $2\n          AND (availability.is_valid = TRUE OR availability.planned = TRUE)\n        ORDER BY availability.avail ASC;\n        ",
   "describe": {
     "columns": [
       {
@@ -107,5 +107,5 @@
       false
     ]
   },
-  "hash": "38ebc180b7302c0ea6f455a43a5c49a80b57ea8ee12dd0266d77b4ee41198777"
+  "hash": "88f15ee51a47d360e62707ff9a93ebf8d8a912cbaca308ab886c60a9d97443f4"
 }
