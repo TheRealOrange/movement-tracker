@@ -32,9 +32,6 @@ pub enum AvailabilityCallbackData {
     Done,
     Cancel,
 
-    // Selection Actions with associated UUID
-    Select { id: Uuid },
-
     // Role View Change Actions
     ViewRole { role: RoleType },
 
@@ -852,7 +849,7 @@ pub(super) async fn plan_view(
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
-        AvailabilityCallbackData::Select { id: parsed_avail_uuid} => {
+        AvailabilityCallbackData::PlanToggle { id: parsed_avail_uuid} => {
             // plan or unplan users
             // if currently planned -> unplan user
             // if currently unplanned -> plan user

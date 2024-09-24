@@ -28,9 +28,11 @@ pub(super) enum State {
     // States used for registering for an account
     RegisterRole {
         msg_id: MessageId,
+        prefix: String,
     },
     RegisterType {
         msg_id: MessageId,
+        prefix: String,
         role_type: RoleType,
     },
     RegisterName {
@@ -46,6 +48,7 @@ pub(super) enum State {
     },
     RegisterComplete {
         msg_id: MessageId,
+        prefix: String,
         role_type: RoleType,
         user_type: UsrType,
         name: String,
@@ -289,9 +292,9 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::AvailabilityAdd { msg_id, avail_type }].endpoint(availability_add_message))
         .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
         //everything below is a catchall case to tell the user they should use a callback button rather than send a message
-        .branch(case![State::RegisterRole { msg_id }].endpoint(press_button_prompt))
-        .branch(case![State::RegisterType { msg_id, role_type }].endpoint(press_button_prompt))
-        .branch(case![State::RegisterComplete { msg_id, role_type, user_type, name, ops_name }].endpoint(press_button_prompt))
+        .branch(case![State::RegisterRole { msg_id, prefix }].endpoint(press_button_prompt))
+        .branch(case![State::RegisterType { msg_id, prefix, role_type }].endpoint(press_button_prompt))
+        .branch(case![State::RegisterComplete { msg_id, prefix, role_type, user_type, name, ops_name }].endpoint(press_button_prompt))
         .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(press_button_prompt))
         .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::ApplyEditPrompt { msg_id, application, admin }].endpoint(press_button_prompt))
@@ -316,9 +319,9 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
     
 
     let callback_query_handler = Update::filter_callback_query()
-        .branch(case![State::RegisterRole { msg_id }].endpoint(register_role))
-        .branch(case![State::RegisterType { msg_id, role_type }].endpoint(register_type))
-        .branch(case![State::RegisterComplete { msg_id, role_type, user_type, name, ops_name }].endpoint(register_complete))
+        .branch(case![State::RegisterRole { msg_id, prefix }].endpoint(register_role))
+        .branch(case![State::RegisterType { msg_id, prefix, role_type }].endpoint(register_type))
+        .branch(case![State::RegisterComplete { msg_id, prefix, role_type, user_type, name, ops_name }].endpoint(register_complete))
         .branch(dptree::filter_async(check_admin_callback)
             .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
             .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(apply_view))
