@@ -521,7 +521,7 @@ pub(crate) async fn get_availability_for_role_and_dates(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.role_type = $1
+        WHERE usrs.role_type = $1 AND usrs.is_valid = TRUE
         AND availability.avail >= $2
         AND availability.avail <= $3
         AND (availability.is_valid = TRUE OR availability.planned = TRUE)
@@ -567,7 +567,7 @@ pub(crate) async fn get_furthest_avail_date_for_role(
         SELECT MAX(availability.avail)
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.role_type = $1
+        WHERE usrs.role_type = $1 AND usrs.is_valid = TRUE
         AND (availability.is_valid = TRUE OR availability.planned = TRUE);
         "#,
         role_type as _  // RoleType enum
@@ -619,7 +619,7 @@ pub(crate) async fn get_users_available_by_role_on_date(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE availability.avail = $1
+        WHERE availability.avail = $1 AND usrs.is_valid = TRUE
           AND usrs.role_type = $2
           AND (availability.is_valid = TRUE OR availability.planned = TRUE)
         ORDER BY usrs.ops_name ASC;
@@ -770,7 +770,7 @@ pub(crate) async fn get_planned_availability_details_by_tele_id(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.tele_id = $1
+        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE
           AND availability.planned = TRUE
         ORDER BY availability.avail ASC;
         "#,
