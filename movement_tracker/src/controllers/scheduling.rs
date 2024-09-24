@@ -32,7 +32,7 @@ pub(crate) async fn check_user_avail_multiple(
             a.updated
         FROM availability a
         INNER JOIN usrs u ON a.usr_id = u.id
-        WHERE u.tele_id = $1
+        WHERE u.tele_id = $1 AND u.is_valid = TRUE
           AND a.avail = ANY($2)
           AND a.is_valid = TRUE
         "#,
@@ -246,7 +246,7 @@ pub(crate) async fn get_upcoming_availability_by_tele_id(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.tele_id = $1
+        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE
         AND availability.avail >= $2
         AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability
         ORDER BY availability.avail ASC;
@@ -301,7 +301,7 @@ pub(crate) async fn get_upcoming_availability_details_by_tele_id(
             availability.updated
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
-        WHERE usrs.tele_id = $1
+        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE
           AND availability.avail >= $2
           AND (availability.is_valid = TRUE OR availability.planned = TRUE)
         ORDER BY availability.avail ASC;
