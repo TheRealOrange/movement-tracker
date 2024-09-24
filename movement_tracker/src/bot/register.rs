@@ -6,16 +6,16 @@ use sqlx::types::Uuid;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, ReplyParameters};
 
-use super::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::utils::generate_prefix;
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
 use callback_data::{CallbackData, CallbackDataHandler};
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]

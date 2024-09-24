@@ -12,13 +12,13 @@ use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, Mess
 use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State;
-use crate::types::{NotificationSettings, RoleType};
+use crate::types::NotificationSettings;
+use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
 use callback_data::CallbackData;
 use callback_data::CallbackDataHandler;
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]

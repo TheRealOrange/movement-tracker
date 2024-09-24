@@ -159,6 +159,7 @@ pub(super) enum State {
     // States meant for viewing the forecast
     ForecastView {
         msg_id: MessageId,
+        prefix: String,
         availability_list: Vec<AvailabilityDetails>,
         role_type: RoleType, 
         start: NaiveDate, 
@@ -315,7 +316,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::AvailabilityModifyType { msg_id, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityDeleteConfirm { msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
-        .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(press_button_prompt));
+        .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(press_button_prompt));
     
 
     let callback_query_handler = Update::filter_callback_query()
@@ -346,7 +347,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::AvailabilityAddChangeType { msg_id, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
         .branch(case![State::AvailabilityAddRemarks { msg_id, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
         .branch(case![State::AvailabilityDeleteConfirm { msg_id, availability_entry, action, start }].endpoint(availability_delete_confirm))
-        .branch(case![State::ForecastView { msg_id, availability_list, role_type, start, end }].endpoint(forecast_view));
+        .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
         .branch(message_handler)
