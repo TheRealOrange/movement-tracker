@@ -1,14 +1,42 @@
 use std::sync::Arc;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+
 use sqlx::PgPool;
-use teloxide::dispatching::dialogue::InMemStorage;
+use sqlx::types::Uuid;
+
 use teloxide::prelude::*;
+use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::types::{ChatKind, InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
-use crate::bot::{handle_error, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+
+use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State;
-use crate::types::NotificationSettings;
+use crate::types::{NotificationSettings, RoleType};
+
+use serde::{Serialize, Deserialize};
+use strum::EnumProperty;
+use callback_data::CallbackData;
+use callback_data::CallbackDataHandler;
+use crate::utils::generate_prefix;
+
+// Represents callback actions with optional associated data.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
+pub enum NotifyCallbackData {
+    // Pagination Actions
+    SystemNotification { enable: bool },
+    RegisterNotification { enable: bool },
+    AvailabilityNotification { enable: bool },
+    PlanNotification { enable: bool },
+    ConflictNotification { enable: bool },
+
+    // Completion Actions
+    Cancel,
+    Confirm,
+    
+    // Disable All notifications Action
+    DisableAll
+}
 
 fn format_notification_settings(settings: &NotificationSettings) -> String {
     format!(
@@ -24,24 +52,25 @@ fn format_notification_settings(settings: &NotificationSettings) -> String {
 fn create_inline_keyboard(settings: &NotificationSettings, prefix: &String) -> InlineKeyboardMarkup {
     let mut buttons: Vec<Vec<InlineKeyboardButton>> = 
         [
-            ("SYSTEM", settings.notif_system),
-            ("REGISTER", settings.notif_register),
-            ("AVAILABILITY", settings.notif_availability),
-            ("PLAN", settings.notif_plan),
-            ("CONFLICT", settings.notif_conflict)
+            ("SYSTEM",       settings.notif_system,       NotifyCallbackData::SystemNotification { enable: !settings.notif_system }),
+            ("REGISTER",     settings.notif_register,     NotifyCallbackData::RegisterNotification { enable: !settings.notif_register }),
+            ("AVAILABILITY", settings.notif_availability, NotifyCallbackData::AvailabilityNotification { enable: !settings.notif_availability }),
+            ("PLAN",         settings.notif_plan,         NotifyCallbackData::PlanNotification { enable: !settings.notif_plan }),
+            ("CONFLICT",     settings.notif_conflict,     NotifyCallbackData::ConflictNotification { enable: !settings.notif_conflict }),
         ].into_iter()
-        .map(|(field, status)| vec![
+        .map(|(field, status, data)| vec![
             InlineKeyboardButton::callback(
                 format!(
                     "{}: {}", field,
                     if !status { "ENABLE" } else { "DISABLE" }
                 ),
-                prefix.clone()+field,
+                data.to_callback_data(prefix),
             ),
         ])
         .collect();
-    buttons.push(["CANCEL", "CONFIRM"].into_iter().map(|text| InlineKeyboardButton::callback(text, prefix.clone()+text)).collect());
-    buttons.push(vec![InlineKeyboardButton::callback("DISABLE ALL", prefix.clone()+"DISABLE ALL")]);
+    buttons.push([("CANCEL", NotifyCallbackData::Cancel), ("CONFIRM", NotifyCallbackData::Confirm)].into_iter()
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix))).collect());
+    buttons.push(vec![InlineKeyboardButton::callback("DISABLE ALL", NotifyCallbackData::DisableAll.to_callback_data(prefix))]);
 
     InlineKeyboardMarkup::new(buttons)
 }
@@ -138,11 +167,7 @@ pub(super) async fn notify(
     };
 
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(5)
-        .map(char::from)
-        .collect();
+    let prefix: String = generate_prefix();
 
     // Send DM to the user with current settings
     let msg_id = match display_dm_config_notification(&bot, ChatId(user.id.0 as i64), &user.username, &settings, &prefix).await {
@@ -169,125 +194,127 @@ pub(super) async fn notify_settings(
         "Prefix" => prefix
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        NotifyCallbackData::Confirm => {
+            // commit to database
+            return match controllers::notifications::update_notification_settings(
+                &pool, chat_id.0,
+                Some(notification_settings.notif_system),
+                Some(notification_settings.notif_register),
+                Some(notification_settings.notif_availability),
+                Some(notification_settings.notif_plan),
+                Some(notification_settings.notif_conflict)
+            ).await {
+                Ok(settings) => {
+                    let message_text = format!(
+                        "Updated notification settings for chat:\n{}",
+                        format_notification_settings(&settings)
+                    );
+                    // Send or edit message
+                    send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
+
+                    if dialogue.chat_id() != chat_id {
+                        send_msg(
+                            bot.send_message(chat_id, format!(
+                                "{} has updated notification settings for chat:\n{}",
+                                utils::username_link_tag(&q.from),
+                                format_notification_settings(&settings)
+                            )).parse_mode(ParseMode::MarkdownV2),
+                            &q.from.username,
+                        ).await;
+                    }
+                    dialogue.update(State::Start).await?;
+                    Ok(())
+                }
+                Err(_) => {
+                    handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
+                    Ok(())
+                },
+            }
+        }
+        NotifyCallbackData::Cancel => {
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Operation cancelled."),
                 &q.from.username,
             ).await;
+
+            if dialogue.chat_id() != chat_id {
+                send_msg(
+                    bot.send_message(chat_id, format!(
+                        "{} has aborted updating notifications",
+                        utils::username_link_tag(&q.from)  // Use first name and user ID if no username
+                    )).parse_mode(ParseMode::MarkdownV2),
+                    &q.from.username,
+                ).await;
+            }
+            dialogue.update(State::Start).await?;
+            return Ok(());
         }
-        Some(option) => {
-            match option.strip_prefix(&prefix) {
-                None => {
+        NotifyCallbackData::DisableAll => {
+            return match controllers::notifications::soft_delete_notification_settings(&pool, chat_id.0).await {
+                Ok(_) => {
                     send_msg(
-                        bot.send_message(dialogue.chat_id(), "Invalid option."),
+                        bot.send_message(dialogue.chat_id(), "Notifications disabled"),
                         &q.from.username,
                     ).await;
+
+                    if dialogue.chat_id() != chat_id {
+                        send_msg(
+                            bot.send_message(chat_id, format!(
+                                "{} has disabled notifications",
+                                utils::username_link_tag(&q.from)
+                            )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
+                            &q.from.username,
+                        ).await;
+                    }
+                    dialogue.update(State::Start).await?;
+                    Ok(())
                 }
-                Some(option) => {
-                    if option == "CONFIRM" {
-                        // commit to database
-                        match controllers::notifications::update_notification_settings(
-                            &pool, chat_id.0, 
-                            Some(notification_settings.notif_system),
-                            Some(notification_settings.notif_register),
-                            Some(notification_settings.notif_availability),
-                            Some(notification_settings.notif_plan),
-                            Some(notification_settings.notif_conflict)
-                        ).await {
-                            Ok(settings) => {
-                                let message_text = format!(
-                                    "Updated notification settings for chat:\n{}",
-                                    format_notification_settings(&settings)
-                                );
-                                // Send or edit message
-                                send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
-                                
-                                if dialogue.chat_id() != chat_id {
-                                    send_msg(
-                                        bot.send_message(chat_id, format!(
-                                            "{} has updated notification settings for chat:\n{}",
-                                            utils::username_link_tag(&q.from),
-                                            format_notification_settings(&settings)
-                                        )).parse_mode(ParseMode::MarkdownV2),
-                                        &q.from.username,
-                                    ).await;
-                                }
-                                dialogue.update(State::Start).await?;
-                                return Ok(());
-                            }
-                            Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await,
-                        }
-                    } else if option == "CANCEL" {
-                        log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), "Operation cancelled."),
-                            &q.from.username,
-                        ).await;
-
-                        if dialogue.chat_id() != chat_id {
-                            send_msg(
-                                bot.send_message(chat_id, format!(
-                                    "{} has aborted updating notifications",
-                                    utils::username_link_tag(&q.from)  // Use first name and user ID if no username
-                                )).parse_mode(ParseMode::MarkdownV2),
-                                &q.from.username,
-                            ).await;
-                        }
-                        dialogue.update(State::Start).await?;
-                        return Ok(());
-                    } else if option == "DISABLE ALL" {
-                        match controllers::notifications::soft_delete_notification_settings(&pool, chat_id.0).await {
-                            Ok(_) => {
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), "Notifications disabled"),
-                                    &q.from.username,
-                                ).await;
-
-                                if dialogue.chat_id() != chat_id {
-                                    send_msg(
-                                        bot.send_message(chat_id, format!(
-                                            "{} has disabled notifications",
-                                            utils::username_link_tag(&q.from)
-                                        )).parse_mode(teloxide::types::ParseMode::MarkdownV2),
-                                        &q.from.username,
-                                    ).await;
-                                }
-                                dialogue.update(State::Start).await?;
-                                return Ok(());
-                            }
-                            Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
-                        }
-                    } else if option == "SYSTEM" {
-                        notification_settings.notif_system = !notification_settings.notif_system;
-                    } else if option == "REGISTER" {
-                        notification_settings.notif_register = !notification_settings.notif_register;
-                    } else if option == "AVAILABILITY" {
-                        notification_settings.notif_availability = !notification_settings.notif_availability;
-                    } else if option == "PLAN" {
-                        notification_settings.notif_plan = !notification_settings.notif_plan;
-                    } else if option == "CONFLICT" {
-                        notification_settings.notif_conflict = !notification_settings.notif_conflict;
-                    } else {
-                        send_msg(
-                            bot.send_message(dialogue.chat_id(), "Invalid option."),
-                            &q.from.username,
-                        ).await;
-                        return Ok(());
-                    }
-
-                    match update_dm_config_notification(&bot, dialogue.chat_id(), &msg_id, &q.from.username, &notification_settings, &prefix).await {
-                        None => dialogue.update(State::ErrorState).await?,
-                        Some(new_msg_id) => dialogue.update(State::NotifySettings { notification_settings, chat_id, prefix, msg_id: new_msg_id }).await?
-                    }
+                Err(_) => {
+                    handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await;
+                    Ok(())
                 }
             }
         }
+        NotifyCallbackData::SystemNotification { enable } => {
+            notification_settings.notif_system = enable;
+        }
+        NotifyCallbackData::RegisterNotification { enable } => {
+            notification_settings.notif_register = enable;
+        }
+        NotifyCallbackData::AvailabilityNotification { enable } => {
+            notification_settings.notif_availability = enable;
+        }
+        NotifyCallbackData::PlanNotification { enable } => {
+            notification_settings.notif_plan = enable;
+        }
+        NotifyCallbackData::ConflictNotification { enable } => {
+            notification_settings.notif_conflict = enable;
+        }
+    }
+    
+    // Intentionally continue using the same prefix to handle quick multiple actions
+    match update_dm_config_notification(&bot, dialogue.chat_id(), &msg_id, &q.from.username, &notification_settings, &prefix).await {
+        None => dialogue.update(State::ErrorState).await?,
+        Some(new_msg_id) => dialogue.update(State::NotifySettings { notification_settings, chat_id, prefix, msg_id: new_msg_id }).await?
     }
 
     Ok(())
