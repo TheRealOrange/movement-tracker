@@ -221,20 +221,32 @@ fn get_planned_change_text(availability: &AvailabilityDetails, changes: &HashSet
 fn get_user_availability_text(
     user_details: &Usr,
     database_list: &Vec<AvailabilityDetails>,
-    changes: &HashSet<Uuid>
+    changes: &HashSet<Uuid>,
+    start: usize,
+    show: usize
 ) -> String {
     let mut message = String::new();
     if database_list.is_empty() {
         message.push_str("No upcoming availability\\.\n");
     } else {
         let usrtype_str = if database_list[0].usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
+        // Pagination logic: slicing the list based on start and show
+        let slice_end = std::cmp::min(start + show, database_list.len());
+        let total_entries = database_list.len();
+
+        // Add header with the range of entries being shown
         message.push_str(format!(
-            "Availability for {}{}:\n",
+            "Showing availability for {}{}\\, entries {} to {} of {}:\n",
             utils::escape_special_characters(&user_details.ops_name),
-            usrtype_str
+            usrtype_str,
+            start + 1,
+            slice_end,
+            total_entries
         ).as_str());
+
+        let shown_entries = &database_list[start..slice_end];
         
-        for availability in database_list {
+        for availability in shown_entries {
             let date_str = utils::escape_special_characters(&availability.avail.format("%d %b, %Y").to_string());
             let ict_type_str = availability.ict_type.as_ref();
 
@@ -267,6 +279,11 @@ fn get_user_availability_text(
                 remarks_str
             ));
         }
+
+        // Add pagination information
+        let current_page = (start / show) + 1;
+        let total_pages = (total_entries as f64 / show as f64).ceil() as usize;
+        message.push_str(&format!("\nPage {} of {}\n", current_page, total_pages));
     }
 
     message
@@ -276,7 +293,9 @@ fn get_user_availability_text(
 fn get_date_availability_text(
     selected_date: &NaiveDate,
     database_list: &Vec<AvailabilityDetails>,
-    changes: &HashSet<Uuid>
+    changes: &HashSet<Uuid>,
+    start: usize,
+    show: usize
 ) -> String {
     let date_str = utils::escape_special_characters(&selected_date.format("%d %b, %Y").to_string());
     let mut message = String::new();
@@ -284,12 +303,21 @@ fn get_date_availability_text(
     if database_list.is_empty() {
         message.push_str(format!("No users available on this date: {}\n", date_str).as_str());
     } else {
-        message.push_str(format!(
-            "Users available on {}:\n",
-            date_str
-        ).as_str());
+        // Pagination logic: slicing the list based on start and show
+        let slice_end = std::cmp::min(start + show, database_list.len());
+        let total_entries = database_list.len();
         
-        for availability in database_list {
+        message.push_str(format!(
+            "Users available on {}\\, showing entries {} to {} of {}:\n",
+            date_str,
+            start + 1,
+            slice_end,
+            total_entries
+        ).as_str());
+
+        let shown_entries = &database_list[start..slice_end];
+        
+        for availability in shown_entries {
             let ict_type_str = availability.ict_type.as_ref();
 
             // Determine the current and toggled planned states
@@ -322,6 +350,11 @@ fn get_date_availability_text(
                 remarks_str
             ));
         }
+
+        // Add pagination information
+        let current_page = (start / show) + 1;
+        let total_pages = (total_entries as f64 / show as f64).ceil() as usize;
+        message.push_str(&format!("\nPage {} of {}\n", current_page, total_pages));
     }
 
     message
@@ -360,7 +393,7 @@ async fn display_user_availability(
     };
 
     // Generate the message text
-    let message_text = get_user_availability_text(user_details, database_list, changes);
+    let message_text = get_user_availability_text(user_details, database_list, changes, start, show);
 
     // Send or edit the message
     Ok(send_or_edit_msg(&bot, chat_id, username, msg_id, message_text, Some(markup), Some(ParseMode::MarkdownV2)).await)
@@ -393,7 +426,7 @@ async fn display_date_availability(
     };
 
     // Generate the message text
-    let message_text = get_date_availability_text(selected_date, database_list, changes);
+    let message_text = get_date_availability_text(selected_date, database_list, changes, start, show);
     
     // Send or edit message
     Ok(send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(markup), Some(ParseMode::MarkdownV2)).await)

@@ -72,7 +72,7 @@ async fn display_availability_forecast(
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     options.push(change_view_roles);
     options.extend(view_range);
-    options.push(vec![InlineKeyboardButton::callback("DONE", "DONE")]);
+    options.push(vec![InlineKeyboardButton::callback("DONE", ForecastCallbackData::ForecastDone.to_callback_data(&prefix))]);
 
     // Header for role type and period with formatted dates
     let mut output_text = format!(
