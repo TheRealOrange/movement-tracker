@@ -1,11 +1,11 @@
-use std::cmp::min;
+use std::cmp::{max, min};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::PgPool;
 use teloxide::prelude::*;
-use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 use sqlx::types::Uuid;
-use crate::bot::{handle_error, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+use crate::bot::{handle_error, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::types::{Availability, AvailabilityDetails};
@@ -27,19 +27,21 @@ fn get_paginated_keyboard(
 
     let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries
         .iter()
-        .map(|entry| {
-            // Format date as "MMM-DD" (3-letter month)
-            let formatted = format!(
-                "{}: {} {}",
-                entry.ops_name,
-                entry.avail.format("%b-%d"),
-                entry.ict_type.as_ref()
-            );
+        .filter_map(|entry| {
+            if !entry.saf100 {
+                // Format date as "MMM-DD" (3-letter month)
+                let formatted = format!(
+                    "{}: {} {}",
+                    entry.ops_name,
+                    entry.avail.format("%b-%d"),
+                    entry.ict_type.as_ref()
+                );
 
-            InlineKeyboardButton::callback(
-                formatted,
-                format!("{}{}", prefix, entry.id),
-            )
+                Some(InlineKeyboardButton::callback(
+                    formatted,
+                    format!("{}{}", prefix, entry.id),
+                ))
+            } else { None }
         })
         .map(|button| vec![button])
         .collect();
@@ -66,16 +68,43 @@ fn get_paginated_text(
     show: usize,
     action: &String,
 ) -> String {
-    // Prepare the message text
     let slice_end = min(start + show, availability.len());
-    let total = availability.len();
-    format!(
-        "Showing {}availability {} to {} out of {}. Choose one to view details:",
+    let shown_entries = availability.get(start..slice_end).unwrap_or(&[]);
+
+    // Header
+    let header = format!(
+        "Showing {}availability \\({} to {}\\) out of {}\\.\n\n",
         if action == "SAF100_SEE_AVAIL" { "" } else { "planned "},
         start + 1,
         slice_end,
-        total
-    )
+        availability.len()
+    );
+
+    // Calculate the length of the longest `ops_name`
+    let max_len = availability.iter()
+        .map(|info| info.ops_name.len())
+        .max()
+        .unwrap_or(0); // Handle case when result is empty
+
+    // Prepare the list of availability entries with SAF100 status
+    let mut entries_text = String::new();
+    for entry in shown_entries {
+        let saf100_status = if entry.saf100 { "✅ SAF100 Issued" } else { if entry.planned { "❌ SAF100 Pending" } else { "\\(NOT PLANNED\\)" }};
+        entries_text.push_str(format!(
+            "\\- `{:<width$}`: {} {}\n{}\n\n",
+            utils::escape_special_characters(&entry.ops_name),
+            utils::escape_special_characters(&entry.avail.format("%b-%d").to_string()),
+            utils::escape_special_characters(&entry.ict_type.as_ref()),
+            saf100_status,
+            width = max_len // Dynamically set the width
+        ).as_str());
+    }
+
+    // Footer with instructions
+    let footer = if availability.is_empty() { "\nNo pendind SAF100\\.".to_string() } else { "\nWhich entry do you want to confirm issued SAF100?".to_string() };
+
+    // Combine all parts
+    format!("{}{}{}", header, entries_text, footer)
 }
 
 // Function to update the original paginated message
@@ -87,9 +116,9 @@ async fn update_paginated_message(
     new_start: &usize,
     show: &usize,
     action: &String,
-    msg_id: &MessageId,
+    msg_id: Option<MessageId>,
     username: &Option<String>,
-) -> Result<(), ()> {
+) -> Result<Option<MessageId>, ()> {
     // Generate the paginated keyboard
     let paginated_keyboard = match get_paginated_keyboard(availability_list, prefix, *new_start, *show) {
         Ok(kb) => kb,
@@ -103,39 +132,65 @@ async fn update_paginated_message(
     };
 
     let message_text = get_paginated_text(availability_list, *new_start, *show, action);
-    // Edit the existing message
-    if let Err(e) = bot.edit_message_text(chat_id, *msg_id, message_text)
-        .reply_markup(paginated_keyboard).await {
-        log::error!("Failed to edit saf100 message during pagination: {}", e);
-        send_msg(
-            bot.send_message(chat_id, "Failed to update availability view."),
-            &username,
-        ).await;
-        return Err(());
-    }
-
-    Ok(())
+    // Send or edit the message
+    Ok(send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(paginated_keyboard), Some(ParseMode::MarkdownV2)).await)
 }
 
 async fn handle_re_show_options(
     bot: &Bot,
     dialogue: &MyDialogue,
-    prefix: String,
-    availability_list: Vec<AvailabilityDetails>,
+    username: &Option<String>,
     start: usize,
     show: usize,
     action: String,
-    msg_id: MessageId,
-    username: &Option<String>,
+    msg_id: Option<MessageId>,
+    pool: &PgPool
 ) -> HandlerResult {
-    match update_paginated_message(&bot, dialogue.chat_id(), &prefix, &availability_list, &start, &show, &action, &msg_id, username)
-        .await {
-        Ok(_) => {
-            // Update the state with the new start index
-            dialogue.update(State::Saf100View { msg_id, availability_list, prefix, start, action }).await?
-        }
-        Err(_) => dialogue.update(State::ErrorState).await?
+
+    // Fetch the relevant availability entries
+    let availability_result = if action == "SAF100_SEE_AVAIL" {
+        controllers::attendance::get_future_valid_availability_for_ns(pool).await
+    } else {
+        controllers::attendance::get_future_planned_availability_for_ns(pool).await
     };
+
+    match availability_result {
+        Ok(availability_list) => {
+            if availability_list.is_empty() {
+                // No entries found
+                send_or_edit_msg(&bot, dialogue.chat_id(), &username, msg_id, "No availability entries found.".into(), None, None).await;
+                dialogue.update(State::Start).await?;
+                return Ok(());
+            }
+
+            // Generate a random prefix for callback data
+            let prefix: String = rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(5)
+                .map(char::from)
+                .collect();
+            
+            let new_start = if start >= availability_list.len() { max(0, availability_list.len() - show) } else { start };
+            match update_paginated_message(&bot, dialogue.chat_id(), &prefix, &availability_list, &new_start, &show, &action, msg_id, username)
+                .await {
+                Ok(msg_id) => {
+                    match msg_id {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(new_msg_id) => {
+                            // Update the state with the new start index
+                            dialogue.update(State::Saf100View { msg_id: new_msg_id, availability_list, prefix, start: new_start, action }).await?
+                        }
+                    }
+                }
+                Err(_) => {
+                    log::error!("Failed to update saf100 paginated menu in chat ({})", dialogue.chat_id().0);
+                    dialogue.update(State::ErrorState).await?
+                }
+            };
+        }
+        Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
+    }
+    
     Ok(())
 }
 
@@ -221,60 +276,7 @@ pub(super) async fn saf100_select(
         "SAF100_SEE_AVAIL" | "SAF100_SEE_PLANNED" => {
             // Determine the action based on selection
             let action = data.clone();
-
-            // Fetch the relevant availability entries
-            let availability_result = if action == "SAF100_SEE_AVAIL" {
-                controllers::attendance::get_future_valid_availability_for_ns(&pool).await
-            } else {
-                controllers::attendance::get_future_planned_availability_for_ns(&pool).await
-            };
-
-            match availability_result {
-                Ok(availability_list) => {
-                    if availability_list.is_empty() {
-                        // No entries found
-                        send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "No availability entries found.".into(), None, None).await;
-                        dialogue.update(State::Start).await?;
-                        return Ok(());
-                    }
-
-                    // Generate a random prefix for callback data
-                    let prefix: String = rand::thread_rng()
-                        .sample_iter(&Alphanumeric)
-                        .take(5)
-                        .map(char::from)
-                        .collect();
-
-                    let start = 0;
-                    let show = 8;
-
-                    // Generate the paginated keyboard
-                    let paginated_keyboard = match get_paginated_keyboard(&availability_list, &prefix, start, show) {
-                        Ok(kb) => kb,
-                        Err(_) => {
-                            send_msg(
-                                bot.send_message(dialogue.chat_id(), "Error encountered while getting availability."),
-                                &q.from.username,
-                            ).await;
-                            dialogue.update(State::ErrorState).await?;
-                            return Ok(());
-                        }
-                    };
-
-                    // Generate the message text
-                    let message_text = get_paginated_text(&availability_list, start, show, &action);
-
-                    // Edit the original message with new text and keyboard, or send a new one
-                    match send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, Some(paginated_keyboard), None).await {
-                        None => dialogue.update(State::ErrorState).await?,
-                        Some(new_msg_id) => {
-                            // Update the dialogue state to Saf100View with necessary context
-                            dialogue.update(State::Saf100View { msg_id: new_msg_id, availability_list, prefix, start, action }).await?
-                        }
-                    }
-                }
-                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
-            }
+            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, 8, action, Some(msg_id), &pool).await?;
         }
         "SAF100_CANCEL" => {
             // Handle cancellation by reverting to the start state
@@ -335,15 +337,16 @@ pub(super) async fn saf100_view(
     match data.as_str() {
         "PREV" => {
             let new_start = if start >= show { start - show } else { 0 };
-            handle_re_show_options(&bot, &dialogue, prefix, availability_list, new_start, show, action, msg_id, &q.from.username).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, new_start, show, action, Some(msg_id), &pool).await?;
         }
         "NEXT" => {
             let entries_len = availability_list.len();
             let new_start = if start + show < entries_len { start + show } else { start };
-            handle_re_show_options(&bot, &dialogue, prefix, availability_list, new_start, show, action, msg_id, &q.from.username).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, new_start, show, action, Some(msg_id), &pool).await?;
         }
         "DONE" => {
-            send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation completed.".into(), None, None).await;
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+            send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, None, "Operation completed.".into(), None, None).await;
             dialogue.update(State::Start).await?
         }
         _ => {
@@ -445,7 +448,7 @@ pub(super) async fn saf100_confirm(
                     notifier::emit::plan_notifications(
                         &bot,
                         format!(
-                            "{} has confirmed SAF100 issued for {} on {}",
+                            "{} has confirmed SAF100 issued for `{}` on {}",
                              utils::username_link_tag(&q.from),
                             details.ops_name,
                             utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string())
@@ -454,18 +457,17 @@ pub(super) async fn saf100_confirm(
                         q.from.id.0 as i64
                     ).await;
                     
-                    let message_text = format!("SAF100 confirmed issued for {} on {}", details.ops_name, details.avail.format("%Y-%m-%d"));
+                    let message_text = format!("SAF100 confirmed issued for `{}` on {}", details.ops_name, details.avail.format("%Y-%m-%d"));
                     // Send or edit message
-                    send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, None).await;
-                    
-                    dialogue.update(State::Start).await?;
+                    send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
+                    handle_re_show_options(&bot, &dialogue, &q.from.username, start, 8, action, None, &pool).await?;
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await,
             }
         }
         "NO" => {
             // logic to go back
-            handle_re_show_options(&bot, &dialogue, prefix, availability_list, start, 8, action, msg_id, &q.from.username).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, start, 8, action, Some(msg_id), &pool).await?;
         }
         _ => {
             send_msg(
