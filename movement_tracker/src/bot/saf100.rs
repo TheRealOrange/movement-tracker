@@ -54,7 +54,7 @@ fn get_paginated_keyboard(
     let mut entries: Vec<Vec<InlineKeyboardButton>> = shown_entries
         .iter()
         .filter_map(|entry| {
-            if !entry.saf100 {
+            if !entry.saf100 && entry.is_valid {
                 // Format date as "MMM-DD" (3-letter month)
                 let formatted = format!(
                     "{}: {} {}",
@@ -100,7 +100,7 @@ fn get_paginated_text(
     // Header
     let header = format!(
         "Showing {}availability \\({} to {}\\) out of {}\\.\n\n",
-        if action == "SAF100_SEE_AVAIL" { "" } else { "planned "},
+        if action == "SAF100_SEE_AVAIL" { "" } else { "*planned* "},
         start + 1,
         slice_end,
         availability.len()
@@ -115,13 +115,14 @@ fn get_paginated_text(
     // Prepare the list of availability entries with SAF100 status
     let mut entries_text = String::new();
     for entry in shown_entries {
-        let saf100_status = if entry.saf100 { "✅ SAF100 Issued" } else { if entry.planned { "❌ SAF100 Pending" } else { "\\(NOT PLANNED\\)" }};
+        let saf100_status = if entry.saf100 { "✅ SAF100 Issued" } else { if entry.planned { "❌ SAF100 Pending" } else { " \\(NOT PLANNED\\)" }};
+        let avail_status = if entry.is_valid { "" } else { " *\\(NOT AVAIL\\)*" };
         entries_text.push_str(format!(
-            "\\- `{:<width$}`: {} {}\n{}\n\n",
+            "\\- `{:<width$}`: {} {}\n{}{}\n\n",
             utils::escape_special_characters(&entry.ops_name),
             utils::escape_special_characters(&entry.avail.format("%b-%d").to_string()),
             utils::escape_special_characters(&entry.ict_type.as_ref()),
-            saf100_status,
+            saf100_status, avail_status,
             width = max_len // Dynamically set the width
         ).as_str());
     }
