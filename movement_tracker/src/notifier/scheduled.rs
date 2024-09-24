@@ -20,114 +20,133 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
     // Start a transaction
     let mut tx = conn.begin().await?;
 
-    // Fetch due notifications
-    let notifications = sqlx::query_as!(
-        ScheduledNotifications,
-        r#"
-        SELECT
-            sn.id,
-            sn.avail_id,
-            sn.scheduled_time,
-            sn.sent,
-            sn.created,
-            sn.updated,
-            sn.is_valid
-        FROM scheduled_notifications sn
-        WHERE sn.scheduled_time <= NOW()
-          AND sn.sent = FALSE
-          AND sn.is_valid = TRUE
-        FOR UPDATE SKIP LOCKED;
-        "#
-    )
-        .fetch_all(&mut *tx)
-        .await?;
-
-    for notification in notifications {
-        // Fetch associated availability
-        let availability = sqlx::query_as!(
-            Availability,
+    // Wrap the entire logic in a block that ensures rollback on error
+    match async {
+        // Fetch due notifications
+        let notifications = sqlx::query_as!(
+            ScheduledNotifications,
             r#"
             SELECT
-                a.id,
-                a.usr_id AS user_id,
-                a.avail,
-                a.ict_type AS "ict_type: _",
-                a.remarks,
-                a.planned,
-                a.saf100,
-                a.attended,
-                a.is_valid,
-                a.created,
-                a.updated
-            FROM availability a
-            WHERE a.id = $1
-              AND a.is_valid = TRUE;
-            "#,
-            notification.avail_id
+                sn.id,
+                sn.avail_id,
+                sn.scheduled_time,
+                sn.sent,
+                sn.created,
+                sn.updated,
+                sn.is_valid
+            FROM scheduled_notifications sn
+            WHERE sn.scheduled_time <= NOW()
+              AND sn.sent = FALSE
+              AND sn.is_valid = TRUE
+            FOR UPDATE SKIP LOCKED;
+            "#
         )
-            .fetch_one(&mut *tx)
+            .fetch_all(&mut *tx)
             .await?;
 
-        // Fetch user details
-        let user = sqlx::query_as!(
-            Usr,
-            r#"
-            SELECT
-                u.id,
-                u.tele_id,
-                u.name,
-                u.ops_name,
-                u.usr_type AS "usr_type: _",
-                u.role_type AS "role_type: _",
-                u.admin,
-                u.created,
-                u.updated
-            FROM usrs u
-            WHERE u.id = $1
-              AND u.is_valid = TRUE;
-            "#,
-            availability.user_id
-        )
-            .fetch_one(&mut *tx)
-            .await?;
-
-        // Prepare detailed notification message
-        let message_text = format_detailed_notification(&availability, &user).unwrap_or_else(|text| text);
-
-        // Log the notification
-        log::info!(
-            "Sending notification to user {} for availability on {}",
-            user.ops_name,
-            availability.avail
-        );
-
-        let chat_id = ChatId(user.tele_id);
-
-        // Send the formatted message to the user with MarkdownV2 parsing
-        if let Err(e) = bot.send_message(chat_id, message_text)
-            .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-            .await
-        {
-            log::error!("Error sending message to user {}: {}", user.ops_name, e);
+        // Check if there are no notifications to process
+        if notifications.is_empty() {
+            log::debug!("No scheduled notifications to process.");
+            return Ok::<(), sqlx::Error>(());
         }
 
-        // Mark the notification as sent
-        sqlx::query!(
-            r#"
-            UPDATE scheduled_notifications
-            SET sent = TRUE, updated = NOW()
-            WHERE id = $1;
-            "#,
-            notification.id
-        )
-            .execute(&mut *tx)
-            .await?;
+        // Process each notification
+        for notification in notifications {
+            // Fetch associated availability
+            let availability = sqlx::query_as!(
+                Availability,
+                r#"
+                SELECT
+                    a.id,
+                    a.usr_id AS user_id,
+                    a.avail,
+                    a.ict_type AS "ict_type: _",
+                    a.remarks,
+                    a.planned,
+                    a.saf100,
+                    a.attended,
+                    a.is_valid,
+                    a.created,
+                    a.updated
+                FROM availability a
+                WHERE a.id = $1
+                  AND a.is_valid = TRUE;
+                "#,
+                notification.avail_id
+            )
+                .fetch_one(&mut *tx)
+                .await?;
+
+            // Fetch user details
+            let user = sqlx::query_as!(
+                Usr,
+                r#"
+                SELECT
+                    u.id,
+                    u.tele_id,
+                    u.name,
+                    u.ops_name,
+                    u.usr_type AS "usr_type: _",
+                    u.role_type AS "role_type: _",
+                    u.admin,
+                    u.created,
+                    u.updated
+                FROM usrs u
+                WHERE u.id = $1
+                  AND u.is_valid = TRUE;
+                "#,
+                availability.user_id
+            )
+                .fetch_one(&mut *tx)
+                .await?;
+
+            // Prepare detailed notification message
+            let message_text = format_detailed_notification(&availability, &user)
+                .unwrap_or_else(|text| text);
+
+            // Log the notification
+            log::info!(
+                "Sending notification to user {} for availability on {}",
+                user.ops_name,
+                availability.avail
+            );
+
+            let chat_id = ChatId(user.tele_id);
+
+            // Send the formatted message to the user with MarkdownV2 parsing
+            if let Err(e) = bot.send_message(chat_id, message_text)
+                .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                .await {
+                log::error!("Error sending message to user {}: {}", user.ops_name, e);
+            }
+
+            // Mark the notification as sent
+            sqlx::query!(
+                r#"
+                UPDATE scheduled_notifications
+                SET sent = TRUE, updated = NOW()
+                WHERE id = $1;
+                "#,
+                notification.id
+            )
+                .execute(&mut *tx)
+                .await?;
+        }
+
+        Ok(())
+    }.await {
+        Ok(_) => {
+            // If the block succeeds, commit the transaction
+            tx.commit().await?;
+            Ok(())
+        }
+        Err(e) => {
+            // If an error occurs, rollback the transaction
+            log::error!("Error processing scheduled notifications, rolling back transaction.");
+            tx.rollback().await?;
+            Err(e)
+        } 
     }
-
-    // Commit the transaction
-    tx.commit().await?;
-
-    Ok(())
 }
 
 /// Formats a detailed notification message with proper MarkdownV2 escaping
