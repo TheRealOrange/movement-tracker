@@ -7,7 +7,7 @@ use teloxide::payloads::SendMessage;
 use teloxide::prelude::*;
 use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
-use teloxide::types::{InlineKeyboardMarkup, MessageId, ParseMode};
+use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 use crate::{controllers, utils};
 
 pub(self) mod commands;
@@ -56,10 +56,13 @@ pub(self) async fn send_or_edit_msg(bot: &Bot, chat_id: ChatId, username: &Optio
     // Send or edit the message
     match msg_id {
         Some(id) => {
+            let empty_keyboard: Vec<Vec<InlineKeyboardButton>> = Vec::new();
             // Edit the existing message
             let mut bot_msg = bot.edit_message_text(chat_id, id, &message_text);
             if let Some(markup) = markup_input.clone() {
                 bot_msg = bot_msg.reply_markup(markup);
+            } else {
+                bot_msg = bot_msg.reply_markup(InlineKeyboardMarkup::new(empty_keyboard));
             }
             if let Some(mode) = parse_mode_input {
                 bot_msg = bot_msg.parse_mode(mode);
@@ -68,7 +71,7 @@ pub(self) async fn send_or_edit_msg(bot: &Bot, chat_id: ChatId, username: &Optio
             match bot_msg.await {
                 Ok(msg) => Some(msg.id),
                 Err(e) => {
-                    log::error!("Failed to edit message: {}", e);
+                    log::error!("Failed to edit message in chat ({}): {}", chat_id.0, e);
                     log_try_delete_msg(&bot, chat_id, id).await;
                     // Failed to edit message, try to send a new one
                     let mut bot_msg = bot.send_message(chat_id, message_text);
@@ -118,7 +121,8 @@ pub(self) async fn log_try_delete_msg(bot: &Bot, chat_id: ChatId, msg_id: Messag
 }
 
 pub(self) async fn log_try_remove_markup(bot: &Bot, chat_id: ChatId, msg_id: MessageId) {
-    match bot.edit_message_reply_markup(chat_id, msg_id).await {
+    let empty_keyboard: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    match bot.edit_message_reply_markup(chat_id, msg_id).reply_markup(InlineKeyboardMarkup::new(empty_keyboard)).await {
         Ok(_) => {}
         Err(_) => { log::error!("Failed to remove message markup ({})", msg_id.0); }
     };
