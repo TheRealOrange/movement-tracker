@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
-use sqlx::PgPool;
+use sqlx::{Error, PgPool};
 
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
@@ -273,16 +273,16 @@ async fn display_availability_edit_prompt(
     
     let formatted_date = availability_entry.avail.format("%b-%d").to_string();
     let availability_edit_text = format!(
-        "You have indicated availability for: {}\nType: {}\nRemarks: {}\n\n What do you wish to edit?",
-        formatted_date,
-        availability_entry.ict_type.as_ref(),
-        availability_entry.remarks.as_deref().unwrap_or("None")
+        "You have indicated availability for: {}\nType: `{}`\nRemarks: {}\n\n What do you wish to edit?",
+        utils::escape_special_characters(&formatted_date),
+        utils::escape_special_characters(&availability_entry.ict_type.as_ref()),
+        utils::escape_special_characters(&availability_entry.remarks.as_deref().unwrap_or("None"))
     );
     
     let keyboard = InlineKeyboardMarkup::new([edit, options]);
     
     // Send or edit message
-    send_or_edit_msg(&bot, chat_id, username, Some(msg_id), availability_edit_text, Some(keyboard), None).await
+    send_or_edit_msg(&bot, chat_id, username, Some(msg_id), availability_edit_text, Some(keyboard), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_edit_types(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
@@ -306,10 +306,10 @@ async fn update_add_availability(bot: &Bot, chat_id: ChatId, avail_type: &Ict, u
     let edit = [("CHANGE TYPE", AvailabilityCallbacks::ChangeType), ("CANCEL", AvailabilityCallbacks::Cancel)]
         .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)));
     let message_text = format!(
-        "Available for: {}\n\nType the dates for which you want to indicate availability. Use commas(only) to separate dates. (e.g. Jan 2, 28/2, 17/04/24)",
-        avail_type.as_ref());
+        "Available for: {}\n\nType the dates for which you want to indicate availability\\. Use commas\\(only\\) to separate dates\\. \\(e\\.g\\. Jan 2\\, 28/2\\, 17/04/24\\)",
+        utils::escape_special_characters(&avail_type.as_ref()));
     // Send or edit message
-    send_or_edit_msg(&bot, chat_id, username, Some(msg_id), message_text, Some(InlineKeyboardMarkup::new([edit])), None).await
+    send_or_edit_msg(&bot, chat_id, username, Some(msg_id), message_text, Some(InlineKeyboardMarkup::new([edit])), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_add_remarks(bot: &Bot, chat_id: ChatId, username: &Option<String>, prefix: &String) -> Option<MessageId> {
@@ -452,33 +452,71 @@ async fn modify_availability_and_go_back(
     match controllers::user::get_user_by_tele_id(&pool, tele_id).await {
         Ok(user) => {
             if user.id == availability_entry.user_id {
+                let original_availability = match controllers::scheduling::get_availability_by_uuid(&pool, availability_entry.id).await {
+                    Ok(entry) => entry,
+                    Err(_) => {
+                        handle_error(&bot, &dialogue, dialogue.chat_id(), username).await;
+                        return Ok(());
+                    }
+                };
+                
                 match controllers::scheduling::edit_avail_by_uuid(&pool, availability_entry.id, None, ict_type_edit, remark_edit).await {
                     Ok(updated) => {
+                        // Build a list of changes
+                        let mut changes = Vec::new();
+
+                        if original_availability.ict_type != updated.ict_type {
+                            changes.push(format!(
+                                "*Available for:* `{}` ➡️ `{}`",
+                                utils::escape_special_characters(&original_availability.ict_type.as_ref()),
+                                utils::escape_special_characters(&updated.ict_type.as_ref())
+                            ));
+                        }
+
+                        if original_availability.remarks != updated.remarks {
+                            if original_availability.remarks.is_none() {
+                                changes.push(format!(
+                                    "*Added remarks:* {}",
+                                    utils::escape_special_characters(&updated.ops_name)
+                                ));
+                            }
+                            changes.push(format!(
+                                "*Remarks modified from:*\n{}⬇️\n{}",
+                                utils::escape_special_characters(&original_availability.remarks.unwrap_or("None".into())),
+                                utils::escape_special_characters(&updated.remarks.unwrap_or("None".into()))
+                            ));
+                        }
+
+                        // Combine all changes into a single message
+                        let changes_message = if changes.is_empty() {
+                            "No changes were made\\.".to_string()
+                        } else {
+                            changes.join("\n")
+                        };
+                        
                         notifier::emit::availability_notifications(
                             &bot,
                             format!(
-                                "{}{} has specified they are AVAIL for {} on {}{}",
+                                "`{}`{} has updated their availability on {}:\n{}",
                                 updated.ops_name,
                                 if updated.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
-                                updated.ict_type.as_ref(),
                                 utils::escape_special_characters(&updated.avail.format("%Y-%m-%d").to_string()),
-                                if updated.remarks.is_some() { "\nRemarks: ".to_owned() + utils::escape_special_characters(updated.remarks.as_deref().unwrap_or("none")).as_str() } else { "".to_string() }
+                                changes_message
                             ).as_str(),
                             &pool,
                             tele_id as i64
                         ).await;
                         
                         let message_text = format!(
-                            "Updated entry for: {} to\nType: {}\nRemarks: {}",
-                            updated.avail.format("%b-%d").to_string(),
-                            updated.ict_type.as_ref(),
-                            updated.remarks.as_deref().unwrap_or("None")
+                            "Updated entry for: {}\n{}",
+                            utils::escape_special_characters(& updated.avail.format("%b-%d").to_string()),
+                            changes_message
                         );
 
-                        send_or_edit_msg(bot, dialogue.chat_id(), username, msg_id, message_text, None, None).await;
+                        send_or_edit_msg(bot, dialogue.chat_id(), username, msg_id, message_text, None, Some(ParseMode::MarkdownV2)).await;
                         handle_go_back(bot, dialogue, username, tele_id, start, show, action, pool, None).await?;
                     }
-                    Err(_) => {}
+                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
                 }
             } else {
                 dialogue.update(State::ErrorState).await?;

@@ -63,6 +63,7 @@ pub(super) enum State {
     },
     ApplyEditPrompt {
         msg_id: MessageId,
+        prefix: String,
         application: Apply,
         admin: bool
     },
@@ -80,18 +81,21 @@ pub(super) enum State {
     },
     ApplyEditRole {
         msg_id: MessageId,
+        prefix: String,
         change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditType {
         msg_id: MessageId,
+        prefix: String,
         change_msg_id: MessageId,
         application: Apply,
         admin: bool
     },
     ApplyEditAdmin {
         msg_id: MessageId,
+        prefix: String,
         change_msg_id: MessageId,
         application: Apply,
         admin: bool
@@ -305,10 +309,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::RegisterComplete { msg_id, prefix, role_type, user_type, name, ops_name }].endpoint(press_button_prompt))
         .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(press_button_prompt))
         .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(press_button_prompt))
-        .branch(case![State::ApplyEditPrompt { msg_id, application, admin }].endpoint(press_button_prompt))
-        .branch(case![State::ApplyEditRole { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
-        .branch(case![State::ApplyEditType { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
-        .branch(case![State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditPrompt { msg_id, prefix, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditRole { msg_id, prefix, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditType { msg_id, prefix, change_msg_id, application, admin }].endpoint(press_button_prompt))
+        .branch(case![State::ApplyEditAdmin { msg_id, prefix, change_msg_id, application, admin }].endpoint(press_button_prompt))
         .branch(case![State::UserEdit { msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
@@ -333,10 +337,10 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(dptree::filter_async(check_admin_callback)
             .branch(case![State::NotifySettings { notification_settings, chat_id, prefix, msg_id }].endpoint(notify_settings))
             .branch(case![State::ApplyView { msg_id, applications, prefix, start }].endpoint(apply_view))
-            .branch(case![State::ApplyEditPrompt { msg_id, application, admin }].endpoint(apply_edit_prompt))
-            .branch(case![State::ApplyEditRole { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_role))
-            .branch(case![State::ApplyEditType { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_type))
-            .branch(case![State::ApplyEditAdmin { msg_id, change_msg_id, application, admin }].endpoint(apply_edit_admin))
+            .branch(case![State::ApplyEditPrompt { msg_id, prefix, application, admin }].endpoint(apply_edit_prompt))
+            .branch(case![State::ApplyEditRole { msg_id, prefix, change_msg_id, application, admin }].endpoint(apply_edit_role))
+            .branch(case![State::ApplyEditType { msg_id, prefix, change_msg_id, application, admin }].endpoint(apply_edit_type))
+            .branch(case![State::ApplyEditAdmin { msg_id, prefix, change_msg_id, application, admin }].endpoint(apply_edit_admin))
             .branch(case![State::UserEdit { msg_id, user_details, prefix }].endpoint(user_edit_prompt))
             .branch(case![State::UserEditType { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_type))
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
