@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            availability.id,\n            usrs.ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            availability.avail,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.planned,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE availability.avail = $1\n          AND usrs.role_type = $2\n          AND (availability.is_valid = TRUE OR availability.planned = TRUE)\n        ORDER BY usrs.ops_name ASC;\n        ",
+  "query": "\n        SELECT\n            availability.id,\n            usrs.ops_name,\n            usrs.usr_type AS \"usr_type: _\",\n            availability.avail,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.planned,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.role_type = $1 AND usrs.is_valid = TRUE\n        AND availability.avail >= $2\n        AND availability.avail <= $3\n        AND (availability.is_valid = TRUE OR availability.planned = TRUE)\n        ORDER BY availability.avail ASC;\n        ",
   "describe": {
     "columns": [
       {
@@ -88,7 +88,6 @@
     ],
     "parameters": {
       "Left": [
-        "Date",
         {
           "Custom": {
             "name": "role_type_enum",
@@ -99,7 +98,9 @@
               ]
             }
           }
-        }
+        },
+        "Date",
+        "Date"
       ]
     },
     "nullable": [
@@ -117,5 +118,5 @@
       false
     ]
   },
-  "hash": "7ec6c1f82711e6c70509528f5efcbc1ace0bef0086f61d107e69252c16bd2af8"
+  "hash": "7d2399c861f63895c157a6eb05b8ad6fd98dd1fa6d2afed740f82e93559e6316"
 }
