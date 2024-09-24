@@ -1,18 +1,50 @@
-use super::{handle_error, log_try_remove_markup, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
-use crate::bot::state::State;
-use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
-use chrono::NaiveDate;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
-use sqlx::PgPool;
 use std::cmp::{max, min};
 use std::collections::HashSet;
 use std::str::FromStr;
-use strum::IntoEnumIterator;
+use chrono::NaiveDate;
+
+use sqlx::PgPool;
+use sqlx::types::Uuid;
+
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
-use uuid::Uuid;
+
+use super::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+use crate::bot::state::State;
+use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
+use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::utils::generate_prefix;
+
+use serde::{Serialize, Deserialize};
+use strum::EnumProperty;
+use strum::IntoEnumIterator;
+use callback_data::CallbackData;
+use callback_data::CallbackDataHandler;
+
+// Represents callback actions with optional associated data.
+#[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
+pub enum AvailabilityCallbackData {
+    // Pagination Actions
+    Prev,
+    Next,
+
+    // Completion Actions
+    Done,
+    Cancel,
+
+    // Selection Actions with associated UUID
+    Select { id: Uuid },
+
+    // Role View Change Actions
+    ViewRole { role: RoleType },
+
+    // Plan Toggle Actions with associated UUID
+    PlanToggle { id: Uuid },
+
+    // Confirmation Actions
+    ConfirmYes,
+    ConfirmNo,
+}
 
 // Generates the inline keyboard for user availability view
 fn get_user_availability_keyboard(
@@ -60,7 +92,7 @@ fn get_user_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                format!("{}{}", prefix, entry.id)
+                AvailabilityCallbackData::PlanToggle { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -68,14 +100,17 @@ fn get_user_availability_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbackData::Prev.to_callback_data(prefix)));
     }
     if slice_end < availability_list.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
+        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbackData::Next.to_callback_data(prefix)));
     }
 
     entries.push(pagination);
-    entries.push(vec![InlineKeyboardButton::callback("DONE", "DONE"), InlineKeyboardButton::callback("CANCEL", "CANCEL")]);
+    entries.push(vec![
+        InlineKeyboardButton::callback("DONE", AvailabilityCallbackData::Done.to_callback_data(prefix)),
+        InlineKeyboardButton::callback("CANCEL", AvailabilityCallbackData::Cancel.to_callback_data(prefix))
+    ]);
 
     Ok(InlineKeyboardMarkup::new(entries))
 }
@@ -127,7 +162,7 @@ fn get_date_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                format!("{}{}", prefix, entry.id)
+                AvailabilityCallbackData::PlanToggle { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -138,7 +173,7 @@ fn get_date_availability_keyboard(
             if *role_type != role {
                 Some(InlineKeyboardButton::callback(
                     format!("VIEW {}", role.as_ref()),
-                    role.as_ref()
+                    AvailabilityCallbackData::ViewRole { role }.to_callback_data(prefix),
                 ))
             } else {
                 None
@@ -149,15 +184,18 @@ fn get_date_availability_keyboard(
     // Add "PREV", "NEXT", and "DONE" buttons
     let mut pagination = Vec::new();
     if start > 0 {
-        pagination.push(InlineKeyboardButton::callback("PREV", "PREV"));
+        pagination.push(InlineKeyboardButton::callback("PREV", AvailabilityCallbackData::Prev.to_callback_data(prefix)));
     }
     if slice_end < availability_list.len() {
-        pagination.push(InlineKeyboardButton::callback("NEXT", "NEXT"));
+        pagination.push(InlineKeyboardButton::callback("NEXT", AvailabilityCallbackData::Next.to_callback_data(prefix)));
     }
 
     entries.push(change_view_roles);
     entries.push(pagination);
-    entries.push(vec![InlineKeyboardButton::callback("DONE", "DONE"), InlineKeyboardButton::callback("CANCEL", "CANCEL")]);
+    entries.push(vec![
+        InlineKeyboardButton::callback("DONE", AvailabilityCallbackData::Done.to_callback_data(prefix)),
+        InlineKeyboardButton::callback("CANCEL", AvailabilityCallbackData::Cancel.to_callback_data(prefix))
+    ]);
 
     Ok(InlineKeyboardMarkup::new(entries))
 }
@@ -557,11 +595,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
         },
     };
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(5)
-        .map(char::from)
-        .collect();
+    let prefix = generate_prefix();
     // Try to interpret the argument as an OPS NAME first
     let cleaned_ops_name = ops_name_or_date.trim().to_uppercase();
     match controllers::user::user_exists_ops_name(&pool, cleaned_ops_name.as_ref()).await{
@@ -725,173 +759,147 @@ pub(super) async fn plan_view(
         "Start" => start
     );
 
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
     // Acknowledge the callback to remove the loading state
     if let Err(e) = bot.answer_callback_query(q.id).await {
         log::error!("Failed to answer callback query: {}", e);
     }
 
-    match q.data {
-        None => {
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+
+    // Handle based on the variant
+    match callback {
+        AvailabilityCallbackData::Prev => {
+            handle_re_show_options(
+                &bot, &dialogue, &q.from.username,
+                user_details, selected_date, changes, role_type,
+                prefix, max(0, start as i64 - 8) as usize, 8,
+                msg_id, &pool
+            ).await?;
+        }
+        AvailabilityCallbackData::Next => {
+            let entries_len = availability_list.len();
+            handle_re_show_options(
+                &bot, &dialogue, &q.from.username,
+                user_details, selected_date, changes, role_type,
+                prefix, if start+8 < entries_len { start+8 } else { start }, 8,
+                msg_id, &pool
+            ).await?;
+        }
+        AvailabilityCallbackData::Cancel => {
+            send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation cancelled.".into(), None, None).await;
+            dialogue.update(State::Start).await?;
+        }
+        AvailabilityCallbackData::Done => {
+            // commit changes
+            log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
             send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                bot.send_message(dialogue.chat_id(), "Done."),
                 &q.from.username,
             ).await;
+
+            match controllers::scheduling::toggle_planned_status_multiple(
+                &pool,
+                changes,
+            ).await {
+                Ok(availability_details) => {
+                    let mut summary = String::new();
+
+                    for details in &availability_details {
+                        let user_type_suffix = if details.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
+                        let status_message = if details.planned {
+                            "has been planned"
+                        } else {
+                            "is no longer planned"
+                        };
+                        let formatted_avail = utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string());
+
+                        // Append to summary
+                        summary.push_str(&format!(
+                            "`{}`{} {} for {} on {}\n",
+                            details.ops_name,
+                            user_type_suffix,
+                            status_message,
+                            details.ict_type.as_ref(),
+                            formatted_avail,
+                        ));
+                    }
+
+                    // notify planned
+                    notifier::emit::plan_notifications(
+                        &bot,
+                        format!(
+                            "{} made the following changes:\n{}",
+                            utils::username_link_tag(&q.from),
+                            summary
+                        ).as_str(),
+                        &pool,
+                        q.from.id.0 as i64
+                    ).await;
+
+                    send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), summary, None, Some(ParseMode::MarkdownV2)).await;
+                    dialogue.update(State::Start).await?;
+                }
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+            }
+        }
+        AvailabilityCallbackData::Select { id: parsed_avail_uuid} => {
+            // plan or unplan users
+            // if currently planned -> unplan user
+            // if currently unplanned -> plan user
+            if changes.contains(&parsed_avail_uuid) {
+                changes.remove(&parsed_avail_uuid);
+            } else {
+                changes.insert(parsed_avail_uuid);
+            }
+
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
                 user_details, selected_date, changes, role_type,
                 prefix, start, 8, msg_id, &pool
             ).await?;
         }
-        Some(option) => {
-            if option == "PREV" {
-                handle_re_show_options(
-                    &bot, &dialogue, &q.from.username,
-                    user_details, selected_date, changes, role_type,
-                    prefix, max(0, start as i64 - 8) as usize, 8,
-                    msg_id, &pool
-                ).await?;
-            } else if option == "NEXT" {
-                let entries_len = availability_list.len();
-                handle_re_show_options(
-                    &bot, &dialogue, &q.from.username,
-                    user_details, selected_date, changes, role_type,
-                    prefix, if start+8 < entries_len { start+8 } else { start }, 8,
-                    msg_id, &pool
-                ).await?;
-            } else if option == "CANCEL" {
-                send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), "Operation cancelled.".into(), None, None).await;
-                dialogue.update(State::Start).await?;
-            } else if option == "DONE" {
-                // commit changes
-                log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                send_msg(
-                    bot.send_message(dialogue.chat_id(), "Done."),
-                    &q.from.username,
-                ).await;
-
-                match controllers::scheduling::toggle_planned_status_multiple(
-                    &pool,
-                    changes,
-                ).await {
-                    Ok(availability_details) => {
-                        let mut summary = String::new();
-
-                        for details in &availability_details {
-                            let user_type_suffix = if details.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
-                            let status_message = if details.planned {
-                                "has been planned"
-                            } else {
-                                "is no longer planned"
-                            };
-                            let formatted_avail = utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string());
-
-                            // Append to summary
-                            summary.push_str(&format!(
-                                "`{}`{} {} for {} on {}\n",
-                                details.ops_name,
-                                user_type_suffix,
-                                status_message,
-                                details.ict_type.as_ref(),
-                                formatted_avail,
-                            ));
-                        }
-                        
-                        // notify planned
-                        notifier::emit::plan_notifications(
-                            &bot,
-                            format!(
-                                "{} made the following changes:\n{}",
-                                utils::username_link_tag(&q.from),
-                                summary
-                            ).as_str(),
-                            &pool,
-                            q.from.id.0 as i64
-                        ).await;
-
-                        send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), summary, None, Some(ParseMode::MarkdownV2)).await;
-                        dialogue.update(State::Start).await?;
-                    }
-                    Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
+        AvailabilityCallbackData::ViewRole { role: role_type_enum } => {
+            match selected_date {
+                Some(selected_date) => {
+                    // Show the available users on that day
+                    handle_re_show_options(
+                        &bot, &dialogue, &q.from.username,
+                        None,
+                        Some(selected_date),
+                        HashSet::new(), role_type_enum,
+                        prefix, 0, 8, msg_id, &pool
+                    ).await?;
                 }
-            } else {
-                match option.strip_prefix(&prefix) {
-                    Some(id) => {
-                        match Uuid::try_parse(&id) {
-                            Ok(parsed_avail_uuid) => {
-                                // plan or unplan users
-                                // if currently planned -> unplan user
-                                // if currently unplanned -> plan user
-                                if changes.contains(&parsed_avail_uuid) {
-                                    changes.remove(&parsed_avail_uuid);
-                                } else {
-                                    changes.insert(parsed_avail_uuid);
-                                }
-                                
-                                handle_re_show_options(
-                                    &bot, &dialogue, &q.from.username,
-                                    user_details, selected_date, changes, role_type,
-                                    prefix, start, 8, msg_id, &pool
-                                ).await?;
-                            }
-                            Err(_) => {
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), "Invalid option."),
-                                    &q.from.username,
-                                ).await;
-                                handle_re_show_options(
-                                    &bot, &dialogue, &q.from.username,
-                                    user_details, selected_date, changes, role_type,
-                                    prefix, start, 8, msg_id, &pool
-                                ).await?;
-                            }
-                        }
-                    }
-                    None => {
-                        // change role logic
-                        match RoleType::from_str(&option) {
-                            Ok(role_type_enum) => {
-                                match selected_date {
-                                    Some(selected_date) => {
-                                        // Show the available users on that day
-                                        handle_re_show_options(
-                                            &bot, &dialogue, &q.from.username,
-                                            None,
-                                            Some(selected_date),
-                                            HashSet::new(), role_type_enum,
-                                            prefix, 0, 8, msg_id, &pool
-                                        ).await?;
-                                    }
-                                    None => {
-                                        send_msg(
-                                            bot.send_message(dialogue.chat_id(), "Invalid option."),
-                                            &q.from.username,
-                                        ).await;
-                                        handle_re_show_options(
-                                            &bot, &dialogue, &q.from.username,
-                                            user_details, selected_date, changes, role_type,
-                                            prefix, start, 8, msg_id, &pool
-                                        ).await?;
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                send_msg(
-                                    bot.send_message(dialogue.chat_id(), "Invalid option."),
-                                    &q.from.username,
-                                ).await;
-                                handle_re_show_options(
-                                    &bot, &dialogue, &q.from.username,
-                                    user_details, selected_date, changes, role_type,
-                                    prefix, start, 8, msg_id, &pool
-                                ).await?;
-                            }
-                        }
-                    }
+                None => {
+                    send_msg(
+                        bot.send_message(dialogue.chat_id(), "Invalid option."),
+                        &q.from.username,
+                    ).await;
+                    handle_re_show_options(
+                        &bot, &dialogue, &q.from.username,
+                        user_details, selected_date, changes, role_type,
+                        prefix, start, 8, msg_id, &pool
+                    ).await?;
                 }
             }
         }
+        _ => {
+            send_msg(
+                bot.send_message(dialogue.chat_id(), "Invalid option."),
+                &q.from.username,
+            ).await;
+        }
     }
-
 
     Ok(())
 }

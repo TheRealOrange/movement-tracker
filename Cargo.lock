@@ -164,14 +164,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "428d9aa8fbc0670b7b8d6030a7fadd0f86151cae55e4dbbece15f3780a3dfaf3"
 
 [[package]]
+name = "callback_data"
+version = "0.1.0"
+dependencies = [
+ "callback_data_derive",
+ "callback_data_traits",
+]
+
+[[package]]
 name = "callback_data_derive"
 version = "0.1.0"
 dependencies = [
+ "callback_data_traits",
  "proc-macro-crate",
  "proc-macro2",
  "quote",
  "syn 2.0.77",
 ]
+
+[[package]]
+name = "callback_data_traits"
+version = "0.1.0"
 
 [[package]]
 name = "cc"
@@ -1067,7 +1080,7 @@ name = "movement_tracker"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "callback_data_derive",
+ "callback_data",
  "chrono",
  "dotenvy",
  "log",

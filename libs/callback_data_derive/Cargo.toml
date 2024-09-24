@@ -11,3 +11,5 @@ proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full"] }
 proc-macro-crate = "3.2.0"
+# Dependency on the traits crate
+callback_data_traits = { path = "../callback_data_traits" }

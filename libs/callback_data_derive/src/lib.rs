@@ -8,7 +8,7 @@ use proc_macro_crate::{crate_name, FoundCrate};
 // encodes it in Base64, and provides methods for serialization and deserialization.
 // The prefix is used as a form of session management to detect invalid data.
 #[proc_macro_derive(CallbackData)]
-pub fn callback_data_derive(input: TokenStream) -> TokenStream {
+pub fn callback_data_handler_derive(input: TokenStream) -> TokenStream {
     // Parse the input tokens into a syntax tree
     let input = parse_macro_input!(input as DeriveInput);
     let enum_name = input.ident;
@@ -26,9 +26,40 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
         }
     };
 
-    // Find the correct path for serde in the user's crate
-    let serde_path = match crate_name("serde") {
-        Ok(FoundCrate::Itself) => quote! { serde },
+    // Helper function to find crate paths
+    fn find_crate_path(crate_name_str: &str) -> Result<proc_macro2::TokenStream, syn::Error> {
+        match crate_name(crate_name_str) {
+            Ok(FoundCrate::Itself) => Ok(quote! { #crate_name_str }),
+            Ok(FoundCrate::Name(name)) => {
+                let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
+                Ok(quote! { #ident })
+            },
+            Err(_) => Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!("Could not find crate `{}`. Please add it to your Cargo.toml.", crate_name_str),
+            )),
+        }
+    }
+
+    // Find paths for serde, rmp-serde, and base64
+    let serde_path = match find_crate_path("serde") {
+        Ok(path) => path,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let rmp_ser_path = match find_crate_path("rmp-serde") {
+        Ok(path) => path,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    let base64_path = match find_crate_path("base64") {
+        Ok(path) => path,
+        Err(err) => return err.to_compile_error().into(),
+    };
+
+    // Find the path to the CallbackDataHandler trait in the prelude crate (`callback_data`)
+    let prelude_crate = match crate_name("callback_data") {
+        Ok(FoundCrate::Itself) => quote! { callback_data },
         Ok(FoundCrate::Name(name)) => {
             let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
             quote! { #ident }
@@ -36,46 +67,14 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
         Err(_) => {
             return syn::Error::new_spanned(
                 enum_name,
-                "Could not find crate `serde`. Please add it to your Cargo.toml.",
+                "Could not find crate `callback_data`. Please add it to your Cargo.toml.",
             )
                 .to_compile_error()
                 .into();
         }
     };
 
-    // Find the correct path for rmp-serde in the user's crate
-    let rmp_ser_path = match crate_name("rmp-serde") {
-        Ok(FoundCrate::Itself) => quote! { rmp_serde },
-        Ok(FoundCrate::Name(name)) => {
-            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            quote! { #ident }
-        },
-        Err(_) => {
-            return syn::Error::new_spanned(
-                enum_name,
-                "Could not find crate `rmp-serde`. Please add it to your Cargo.toml.",
-            )
-                .to_compile_error()
-                .into();
-        }
-    };
-
-    // Find the correct path for base64
-    let base64_path = match crate_name("base64") {
-        Ok(FoundCrate::Itself) => quote! { base64 },
-        Ok(FoundCrate::Name(name)) => {
-            let ident = syn::Ident::new(&name, proc_macro2::Span::call_site());
-            quote! { #ident }
-        },
-        Err(_) => {
-            return syn::Error::new_spanned(
-                enum_name,
-                "Could not find crate `base64`. Please add it to your Cargo.toml.",
-            )
-                .to_compile_error()
-                .into();
-        }
-    };
+    let trait_path = quote! { ::#prelude_crate::CallbackDataHandler };
 
     // Generate a unique helper struct name based on the enum name
     let helper_struct_name = syn::Ident::new(
@@ -83,7 +82,7 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
         proc_macro2::Span::call_site(),
     );
 
-    // Define the helper struct with a unique name and fully qualified serde traits
+    // Define the helper struct with serde traits
     let helper_struct = quote! {
         #[derive(::#serde_path::Serialize, ::#serde_path::Deserialize)]
         struct #helper_struct_name<T> {
@@ -92,7 +91,7 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
         }
     };
 
-    // Prepare vectors to hold match arms for serialization
+    // Prepare match arms for serialization
     let mut serialize_arms = Vec::new();
 
     for variant in variants {
@@ -103,30 +102,24 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
                 // Variants without fields
                 serialize_arms.push(quote! {
                     #enum_name::#variant_name => {
-                        // Create payload
                         let payload = #helper_struct_name {
                             prefix: prefix.to_string(),
                             data: #enum_name::#variant_name,
                         };
-                        // Serialize using MessagePack
                         let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
-                        // Encode to Base64
                         #base64_path::encode(&serialized)
                     }
                 });
             },
             Fields::Named(_) | Fields::Unnamed(_) => {
-                // Variants with named or unnamed fields
+                // Variants with fields
                 serialize_arms.push(quote! {
-                    #enum_name::#variant_name { .. } => {
-                        // Create payload
+                    variant => {
                         let payload = #helper_struct_name {
                             prefix: prefix.to_string(),
-                            data: self.clone(),
+                            data: variant.clone(),
                         };
-                        // Serialize using MessagePack
                         let serialized = #rmp_ser_path::to_vec(&payload).expect("Serialization failed");
-                        // Encode to Base64
                         #base64_path::encode(&serialized)
                     }
                 });
@@ -134,27 +127,20 @@ pub fn callback_data_derive(input: TokenStream) -> TokenStream {
         }
     }
 
-    // Generate the implementation
+    // Generate the implementation of the trait
     let expanded = quote! {
         #helper_struct
 
-        impl #enum_name {
-            // Serializes the enum into a callback data string with the given prefix.
-            pub fn to_callback_data(&self, prefix: &str) -> String {
-                let serialized_data = match self {
+        impl #trait_path for #enum_name {
+            fn to_callback_data(&self, prefix: &str) -> String {
+                match self {
                     #( #serialize_arms ),*
-                };
-                serialized_data
+                }
             }
 
-            // Deserializes a callback data string into the corresponding enum variant.
-            // It verifies that the embedded prefix matches the expected prefix.
-            pub fn from_callback_data(data: &str, expected_prefix: &str) -> Option<Self> {
-                // Decode Base64
+            fn from_callback_data(data: &str, expected_prefix: &str) -> Option<Self> {
                 let decoded = #base64_path::decode(data).ok()?;
-                // Deserialize the payload using MessagePack
                 let payload: #helper_struct_name<#enum_name> = #rmp_ser_path::from_slice(&decoded).ok()?;
-                // Verify the prefix
                 if payload.prefix == expected_prefix {
                     Some(payload.data)
                 } else {

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-    "callback_data_derive",
-    "movement_tracker",
+    "libs/callback_data",
+    "libs/callback_data_traits",
+    "libs/callback_data_derive",
+    "movement_tracker"
 ]
+

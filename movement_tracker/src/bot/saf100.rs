@@ -1,20 +1,24 @@
 use std::cmp::{max, min};
+
 use sqlx::PgPool;
+use sqlx::types::Uuid;
+
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
-use sqlx::types::Uuid;
-use crate::bot::{handle_error, log_try_remove_markup, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+
+use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::types::{Availability, AvailabilityDetails};
-use serde::{Serialize, Deserialize};
-use strum_macros::{EnumString, Display};
-use strum::EnumProperty;
-use callback_data_derive::CallbackData;
 use crate::utils::generate_prefix;
 
+use serde::{Serialize, Deserialize};
+use strum::EnumProperty;
+use callback_data::CallbackData;
+use callback_data::CallbackDataHandler;
+
 // Represents callback actions with optional associated data.
-#[derive(Debug, Clone, Serialize, Deserialize, EnumString, Display, EnumProperty, CallbackData)]
+#[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
 pub enum Saf100CallbackData {
     // Initial Selection Actions
     SeeAvail,
@@ -288,17 +292,9 @@ pub(super) async fn saf100_select(
     }
 
     // Deserialize the callback data into the enum
-    let callback = Saf100CallbackData::from_callback_data(&data, &prefix);
-    let callback = match callback {
-        Some(cb) => cb,
-        None => {
-            log::error!("Failed to parse callback data");
-            send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &q.from.username,
-            ).await;
-            return Ok(());
-        }
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
     };
 
     // Handle based on the variant
@@ -363,19 +359,11 @@ pub(super) async fn saf100_view(
     }
 
     // Deserialize the callback data into the enum
-    let callback = Saf100CallbackData::from_callback_data(&data, &prefix);
-    let callback = match callback {
-        Some(cb) => cb,
-        None => {
-            log::error!("Failed to parse callback data");
-            send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &q.from.username,
-            ).await;
-            return Ok(());
-        }
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
     };
-    
+
     let show = 8;
 
     match callback {
@@ -405,7 +393,7 @@ pub(super) async fn saf100_view(
                         availability_entry.ict_type.as_ref(),
                         availability_entry.remarks.as_deref().unwrap_or("None")
                     );
-                    
+
                     let new_prefix = generate_prefix();
 
                     // Send or edit message
@@ -422,7 +410,7 @@ pub(super) async fn saf100_view(
                     ).await;
                 }
             }
-            
+
         }
         _ => {
             send_msg(
@@ -463,17 +451,9 @@ pub(super) async fn saf100_confirm(
     }
 
     // Deserialize the callback data into the enum
-    let callback = Saf100CallbackData::from_callback_data(&data, &prefix);
-    let callback = match callback {
-        Some(cb) => cb,
-        None => {
-            log::error!("Failed to parse callback data");
-            send_msg(
-                bot.send_message(dialogue.chat_id(), "Invalid option."),
-                &q.from.username,
-            ).await;
-            return Ok(());
-        }
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
     };
 
     match callback {

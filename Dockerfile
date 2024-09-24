@@ -6,7 +6,7 @@ RUN apk add --no-cache --purge openssl-dev openssl-libs-static musl-dev libc-dev
 
 # Copy source files
 COPY movement_tracker ./movement_tracker
-COPY callback_data_derive ./callback_data_derive
+COPY libs ./libs
 COPY Cargo.toml Cargo.lock ./
 # Offline query cache for sqlx build, generate with `cargo sqlx prepare`
 COPY .sqlx ./.sqlx

@@ -9,6 +9,7 @@ use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
 use crate::{controllers, utils};
+use callback_data::CallbackDataHandler;
 
 pub(self) mod commands;
 pub(self) mod user;
@@ -273,6 +274,23 @@ async fn retrieve_callback_data(bot: &Bot, chat_id: ChatId, q: &CallbackQuery) -
             send_msg(
                 bot.send_message(chat_id, "Invalid option."),
                 &q.from.username,
+            ).await;
+            Err(())
+        }
+    }
+}
+
+async fn match_callback_data<T>(
+    bot: &Bot, chat_id: ChatId, username: &Option<String>, data: &String, prefix: &String
+) -> Result<T, ()> where T: CallbackDataHandler  {
+    let callback = T::from_callback_data(data, prefix);
+    match callback {
+        Some(cb) => Ok(cb),
+        None => {
+            log::error!("Failed to parse callback data");
+            send_msg(
+                bot.send_message(chat_id, "Invalid option."),
+                username,
             ).await;
             Err(())
         }
