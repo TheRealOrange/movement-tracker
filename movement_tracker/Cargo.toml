@@ -1,0 +1,41 @@
+[package]
+name = "movement_tracker"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+#warp for health check endpoint
+warp = "0.3"
+#teloxide dependencies for interaction with the telegram bot api
+teloxide = { version = "0.13", features = ["macros"] }
+log = "0.4"
+pretty_env_logger = "0.5.0"
+#sqlx library for connection to postgres database
+sqlx = { version = "0.8.2", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "macros"]}
+#tokio runtime for async code
+tokio = { version =  "1.40", features = ["rt-multi-thread", "macros"] }
+serde = { version = "1.0.210", features = ["derive"] }
+dotenvy = "0.15.7"
+strum = { version = "0.26", features = ["derive"] }
+strum_macros = "0.26"
+rand = "0.8"
+chrono = "0.4.38"
+regex = "1.10.5"
+once_cell = "1.19.0"
+# Procedural macro dependency
+callback_data = { path = "../libs/callback_data" }
+# dependencies for proc macro
+rmp-serde = "1.3"
+base64 = "0.22.1"
+
+[dependencies.uuid]
+version = "1.10.0"
+features = [
+    "v4",                # Lets you generate random UUIDs
+    "fast-rng",          # Use a faster (but still sufficiently random) RNG
+    "macro-diagnostics", # Enable better diagnostics for compile-time UUIDs
+    "serde"              # Serialization for callback data
+]
+

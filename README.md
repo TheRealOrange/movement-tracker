@@ -27,7 +27,7 @@ Refer to the `docker-compose.yml` file for an example of how one may run the app
 
 ```bash
 git clone <repository-url>
-cd movement-tracker
+cd movement_tracker
 ```
 
 ### 2. Environment Configuration

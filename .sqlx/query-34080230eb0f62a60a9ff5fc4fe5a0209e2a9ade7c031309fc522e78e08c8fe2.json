@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                sn.id,\n                sn.avail_id,\n                sn.scheduled_time,\n                sn.sent,\n                sn.created,\n                sn.updated,\n                sn.is_valid\n            FROM scheduled_notifications sn\n            WHERE sn.scheduled_time <= NOW()\n              AND sn.sent = FALSE\n              AND sn.is_valid = TRUE\n            FOR UPDATE SKIP LOCKED;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "avail_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scheduled_time",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "sent",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "created",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_valid",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "34080230eb0f62a60a9ff5fc4fe5a0209e2a9ade7c031309fc522e78e08c8fe2"
+}
