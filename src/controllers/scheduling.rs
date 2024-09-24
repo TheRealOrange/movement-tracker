@@ -400,8 +400,14 @@ pub(crate) async fn add_user_avail(
             ON CONFLICT (usr_id, avail) DO UPDATE
                 SET
                     ict_type = EXCLUDED.ict_type,
-                    remarks = COALESCE(EXCLUDED.remarks, availability.remarks),
-                    planned = COALESCE(EXCLUDED.planned, availability.planned),
+                    remarks = CASE
+                        WHEN availability.is_valid THEN COALESCE(EXCLUDED.remarks, availability.remarks)
+                        ELSE EXCLUDED.remarks
+                    END,
+                    planned = CASE
+                        WHEN availability.is_valid THEN COALESCE(EXCLUDED.planned, availability.planned)
+                        ELSE EXCLUDED.planned
+                    END,
                     is_valid = TRUE
             RETURNING *
         ),
