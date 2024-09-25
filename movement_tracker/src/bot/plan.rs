@@ -70,8 +70,8 @@ fn get_user_availability_keyboard(
                 "PLAN"
             };
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.chars().count() > 8 {
-                    format!(", {}...", remarks.chars().take(8).collect::<String>().as_str())
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_BUTTON {
+                    format!(", {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_BUTTON).collect::<String>().as_str())
                 } else {
                     format!(", {}", remarks)
                 }
@@ -140,8 +140,8 @@ fn get_date_availability_keyboard(
                 "PLAN"
             };
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.chars().count() > 8 {
-                    format!(", {}...", remarks.chars().take(8).collect::<String>())
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_BUTTON {
+                    format!(", {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_BUTTON).collect::<String>())
                 } else {
                     format!(", {}", remarks)
                 }
@@ -253,14 +253,14 @@ fn get_user_availability_text(
             let planned_str = get_planned_change_text(&availability, changes);
             
             let avail_str = if availability.is_valid { "" } else { " *\\(UNAVAIL\\)*" };
-            let saf100_str = if availability.saf100 { " SAF100 ISSUED" }
-            else if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" }
+            let saf100_str = if availability.saf100 { "\n SAF100 ISSUED" }
+            else if availability.planned && availability.usr_type == UsrType::NS { "\n *PENDING SAF100*" }
             else { "" };
 
-            // Truncate remarks to a max of 15 characters
+            // Truncate remarks
             let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.chars().count() > 15 {
-                    format!("\nRemarks: {}\\.\\.\\.", utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_TEXT {
+                    format!("\nRemarks: {}\\.\\.\\.", utils::escape_special_characters(remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_TEXT).collect::<String>().as_str()))
                 } else {
                     format!("\nRemarks: {}", utils::escape_special_characters(&remarks))
                 }
@@ -269,13 +269,13 @@ fn get_user_availability_text(
             };
 
             message.push_str(&format!(
-                "\\- {} __{}__\n{}{}\n{}{}\n",
+                "\\- {} __{}__{}\n{}{}{}\n",
                 date_str,
                 ict_type_str,
+                remarks_str,
                 avail_str,
                 planned_str,
-                saf100_str,
-                remarks_str
+                saf100_str
             ));
         }
 
@@ -324,14 +324,14 @@ fn get_date_availability_text(
             
             let avail_str = if availability.is_valid { "" } else { " *\\(UNAVAIL\\)*" };
             let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
-            let saf100_str = if availability.saf100 { " SAF100 ISSUED" }
-            else if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" }
+            let saf100_str = if availability.saf100 { "\n SAF100 ISSUED" }
+            else if availability.planned && availability.usr_type == UsrType::NS { "\n *PENDING SAF100*" }
             else { "" };
 
-            // Truncate remarks to a max of 15 characters
+            // Truncate remarks
             let remarks_str = if let Some(remarks) = &availability.remarks {
-                if remarks.chars().count() > 15 {
-                    format!("\nRemarks: {}\\.\\.\\.", utils::escape_special_characters(remarks.chars().take(15).collect::<String>().as_str()))
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_TEXT {
+                    format!("\nRemarks: {}\\.\\.\\.", utils::escape_special_characters(remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_TEXT).collect::<String>().as_str()))
                 } else {
                     format!("\nRemarks: {}", utils::escape_special_characters(&remarks))
                 }
@@ -340,13 +340,13 @@ fn get_date_availability_text(
             };
 
             message.push_str(&format!(
-                "\\- {}{} __{}__\n{}{}\n{}{}\n",
+                "\\- {}{} __{}__{}\n{}{}{}\n\n",
                 availability.ops_name, usrtype_str,
                 ict_type_str,
+                remarks_str,
                 avail_str,
                 planned_str,
-                saf100_str,
-                remarks_str
+                saf100_str
             ));
         }
 
@@ -535,7 +535,7 @@ async fn handle_re_show_options(
 
     match live_availability_list {
         Ok(database_list) => {
-            let newstart = if start < database_list.len()-1 { start } else { max(start as i64 - 8, 0) as usize };
+            let newstart = if start < database_list.len()-1 { start } else { max(start as i64 - utils::MAX_SHOW_ENTRIES as i64, 0) as usize };
             match user_details {
                 Some(user_details) => {
                     // Viewing availability by user
@@ -643,7 +643,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
                                     &bot, &dialogue, &user.username,
                                     user_details, availability_list, HashSet::new(),
                                     query_user_details.role_type,
-                                    prefix, 0, 8,
+                                    prefix, 0, utils::MAX_SHOW_ENTRIES,
                                 ).await?;
                             }
                             Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
@@ -676,7 +676,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
                                     &bot, &dialogue, &user.username,
                                     selected_date, availability_list, HashSet::new(),
                                     query_user_details.role_type,
-                                    prefix, 0, 8
+                                    prefix, 0, utils::MAX_SHOW_ENTRIES
                                 ).await?;
                             }
                             Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &user.username).await
@@ -811,7 +811,7 @@ pub(super) async fn plan_view(
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
                 user_details, selected_date, changes, role_type,
-                prefix, max(0, start as i64 - 8) as usize, 8,
+                prefix, max(0, start as i64 - utils::MAX_SHOW_ENTRIES as i64) as usize, utils::MAX_SHOW_ENTRIES,
                 msg_id, &pool
             ).await?;
         }
@@ -820,7 +820,7 @@ pub(super) async fn plan_view(
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
                 user_details, selected_date, changes, role_type,
-                prefix, if start+8 < entries_len { start+8 } else { start }, 8,
+                prefix, if start+utils::MAX_SHOW_ENTRIES < entries_len { start+utils::MAX_SHOW_ENTRIES } else { start }, utils::MAX_SHOW_ENTRIES,
                 msg_id, &pool
             ).await?;
         }
@@ -894,7 +894,7 @@ pub(super) async fn plan_view(
             handle_re_show_options(
                 &bot, &dialogue, &q.from.username,
                 user_details, selected_date, changes, role_type,
-                prefix, start, 8, msg_id, &pool
+                prefix, start, utils::MAX_SHOW_ENTRIES, msg_id, &pool
             ).await?;
         }
         PlanCallbacks::ViewRole { role: role_type_enum } => {
@@ -906,7 +906,7 @@ pub(super) async fn plan_view(
                         None,
                         Some(selected_date),
                         HashSet::new(), role_type_enum,
-                        prefix, 0, 8, msg_id, &pool
+                        prefix, 0, utils::MAX_SHOW_ENTRIES, msg_id, &pool
                     ).await?;
                 }
                 None => {
@@ -917,7 +917,7 @@ pub(super) async fn plan_view(
                     handle_re_show_options(
                         &bot, &dialogue, &q.from.username,
                         user_details, selected_date, changes, role_type,
-                        prefix, start, 8, msg_id, &pool
+                        prefix, start, utils::MAX_SHOW_ENTRIES, msg_id, &pool
                     ).await?;
                 }
             }
