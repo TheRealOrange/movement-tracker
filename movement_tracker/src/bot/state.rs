@@ -189,7 +189,6 @@ pub(super) enum State {
     },
     PlanViewAvailability {
         msg_id: MessageId,
-        change_msg_id: MessageId,
         user_details: Option<Usr>,
         selected_date: Option<NaiveDate>,
         changes: HashSet<Uuid>,
@@ -334,7 +333,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(press_button_prompt))
-        .branch(case![State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::PlanViewAvailability { msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
@@ -364,7 +363,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(plan_view))
-            .branch(case![State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(plan_view_availability))
+            .branch(case![State::PlanViewAvailability { msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(plan_view_availability))
             .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(saf100_select))
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
             .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
