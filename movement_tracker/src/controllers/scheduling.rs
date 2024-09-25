@@ -372,6 +372,48 @@ pub(crate) async fn get_availability_by_uuid(
     }
 }
 
+pub(crate) async fn get_availability_details_by_uuid(
+    conn: &PgPool,
+    availability_id: Uuid,
+) -> Result<AvailabilityDetails, sqlx::Error> {
+    let result = sqlx::query_as!(
+        AvailabilityDetails,
+        r#"
+        SELECT
+            availability.id,
+            usrs.ops_name,
+            usrs.usr_type AS "usr_type: _",
+            availability.avail,
+            availability.planned,
+            availability.ict_type AS "ict_type: _",
+            availability.remarks,
+            availability.saf100,
+            availability.attended,
+            availability.is_valid,
+            availability.created,
+            availability.updated
+        FROM availability
+        JOIN usrs ON usrs.id = availability.usr_id
+        WHERE availability.id = $1 AND usrs.is_valid = TRUE
+        AND (availability.is_valid = TRUE OR availability.planned = TRUE);  -- Only fetch valid availability entries
+        "#,
+        availability_id
+    )
+        .fetch_one(conn)
+        .await;
+
+    match result {
+        Ok(availability) => {
+            log::info!("Found valid availability with details with id: {}", availability_id);
+            Ok(availability)
+        }
+        Err(e) => {
+            log::error!("Error fetching valid availability with details by id: {}", e);
+            Err(e)
+        }
+    }
+}
+
 pub(crate) async fn add_user_avail(
     conn: &PgPool,
     tele_id: u64,
