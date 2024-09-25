@@ -2,15 +2,15 @@ use std::cmp::{max, min};
 use std::collections::HashSet;
 use chrono::NaiveDate;
 
-use sqlx::PgPool;
+use sqlx::{Error, PgPool};
 use sqlx::types::Uuid;
 
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode, User};
 
-use super::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
+use super::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
-use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
+use crate::types::{Availability, AvailabilityDetails, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::utils::generate_prefix;
 
@@ -35,6 +35,7 @@ enum PlanCallbacks {
     ViewRole { role: RoleType },
 
     // Plan Toggle Actions with associated UUID
+    Select { id: Uuid },
     Toggle { id: Uuid },
 
     // Confirmation Actions
@@ -88,7 +89,7 @@ fn get_user_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                PlanCallbacks::Toggle { id: entry.id }.to_callback_data(prefix),
+                PlanCallbacks::Select { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -158,7 +159,7 @@ fn get_date_availability_keyboard(
             );
             vec![InlineKeyboardButton::callback(
                 formatted,
-                PlanCallbacks::Toggle { id: entry.id }.to_callback_data(prefix),
+                PlanCallbacks::Select { id: entry.id }.to_callback_data(prefix),
             )]
         })
         .collect();
@@ -321,12 +322,10 @@ fn get_date_availability_text(
 
             // Determine the current and toggled planned states
             let planned_str = get_planned_change_text(&availability, changes);
-            
+
             let avail_str = if availability.is_valid { "" } else { " *\\(UNAVAIL\\)*" };
             let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
-            let saf100_str = if availability.saf100 { "\n SAF100 ISSUED" }
-            else if availability.planned && availability.usr_type == UsrType::NS { "\n *PENDING SAF100*" }
-            else { "" };
+            let saf100_str = if availability.saf100 { "\n SAF100 ISSUED" } else if availability.planned && availability.usr_type == UsrType::NS { "\n *PENDING SAF100*" } else { "" };
 
             // Truncate remarks
             let remarks_str = if let Some(remarks) = &availability.remarks {
@@ -340,8 +339,8 @@ fn get_date_availability_text(
             };
 
             message.push_str(&format!(
-                "\\- {}{} __{}__{}\n{}{}{}\n\n",
-                availability.ops_name, usrtype_str,
+                "\\- `{}`{} __{}__{}\n{}{}{}\n\n",
+                utils::escape_special_characters(&availability.ops_name), usrtype_str,
                 ict_type_str,
                 remarks_str,
                 avail_str,
@@ -357,6 +356,45 @@ fn get_date_availability_text(
     }
 
     message
+}
+
+async fn display_availability_details(bot: &Bot, chat_id: ChatId, username: &Option<String>, availability: AvailabilityDetails, prefix: &String, msg_id: Option<MessageId>) -> Option<MessageId> {
+    let plan_button_text = if availability.planned { "UNPLAN" } else { "PLAN" };
+    let options = [(plan_button_text, PlanCallbacks::Toggle { id: availability.id }), ("BACK", PlanCallbacks::Cancel)]
+        .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
+
+    let usrtype_str = if availability.usr_type == UsrType::NS { " \\(NS\\)" } else { "" };
+    let avail_str = if availability.is_valid { "*available*" } else { "*unavailable*" };
+    let date_str = utils::escape_special_characters(&availability.avail.format("%d %b, %Y").to_string());
+    let conflict_str = if availability.planned {
+        if !availability.is_valid {
+            "\\, but they are *planned* ⚠️\\!"
+        } else {
+            "\\."
+        }
+    } else { "\\." };
+
+    let remarks_str = if let Some(remarks) = &availability.remarks {
+        format!("Remarks: {}", utils::escape_special_characters(&remarks))
+    } else {
+        "Remarks: None".into()
+    };
+
+    let saf100_str = if availability.saf100 { " *SAF100 ISSUED*" }
+    else if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" }
+    else { "" };
+    
+    let plan_str = if availability.planned { "PLANNED" } else { "UNPLANNED" };
+    let change_plan_str = if !availability.planned { "PLANNED" } else { "UNPLANNED" };
+    
+    let message_text = format!(
+        "`{}`{} has indicated they are {} on {}{}\n{}\nPlan Status: *{}* {}\n\nDo you want to change planned status to *{}*?",
+        utils::escape_special_characters(&availability.ops_name), usrtype_str,
+        avail_str, date_str, conflict_str,
+        remarks_str, plan_str, saf100_str, change_plan_str
+    );
+    
+    send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(InlineKeyboardMarkup::new([options])), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn display_enter_ops_name_or_date(bot: &Bot, chat_id: ChatId, username: &Option<String>) -> Option<MessageId> {
@@ -761,7 +799,7 @@ pub(super) async fn plan_view(
         user_details,
         selected_date,
         availability_list,
-        mut changes,
+        changes,
         role_type,
         prefix,
         start
@@ -881,21 +919,21 @@ pub(super) async fn plan_view(
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
         }
-        PlanCallbacks::Toggle { id: parsed_avail_uuid} => {
-            // plan or unplan users
-            // if currently planned -> unplan user
-            // if currently unplanned -> plan user
-            if changes.contains(&parsed_avail_uuid) {
-                changes.remove(&parsed_avail_uuid);
-            } else {
-                changes.insert(parsed_avail_uuid);
+        PlanCallbacks::Select { id: parsed_avail_uuid} => {
+            // Show detailed availability entry
+            match controllers::scheduling::get_availability_details_by_uuid(&pool, parsed_avail_uuid).await {
+                Ok(availability_entry) => {
+                    log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
+                    match display_availability_details(&bot, dialogue.chat_id(), &q.from.username, availability_entry, &prefix, None).await {
+                        None => dialogue.update(State::ErrorState).await?,
+                        Some(change_msg_id) => {
+                            dialogue.update(State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start  }).await?
+                        }
+                    }
+                }
+                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
             }
-
-            handle_re_show_options(
-                &bot, &dialogue, &q.from.username,
-                user_details, selected_date, changes, role_type,
-                prefix, start, utils::MAX_SHOW_ENTRIES, msg_id, &pool
-            ).await?;
+            
         }
         PlanCallbacks::ViewRole { role: role_type_enum } => {
             match selected_date {
@@ -931,4 +969,91 @@ pub(super) async fn plan_view(
     }
 
     Ok(())
+}
+
+pub(super) async fn plan_view_availability(
+    bot: Bot,
+    dialogue: MyDialogue,
+    q: CallbackQuery,
+    (
+        msg_id,
+        change_msg_id,
+        user_details,
+        selected_date,
+        mut changes,
+        role_type,
+        prefix,
+        start
+    ): (
+        MessageId,
+        MessageId,
+        Option<Usr>,
+        Option<NaiveDate>,
+        HashSet<Uuid>,
+        RoleType,
+        String,
+        usize
+    ),
+    pool: PgPool
+) -> HandlerResult {
+    log_endpoint_hit!(dialogue.chat_id(), "plan_view_availability", "Callback", q,
+        "MessageId" => msg_id,
+        "Change MessageId" => change_msg_id,
+        "UserDetails" => user_details,
+        "SelectedDate" => selected_date,
+        "Changes" => changes,
+        "RoleType" => role_type,
+        "Prefix" => prefix,
+        "Start" => start
+    );
+
+    // Extract the callback data
+    let data = match retrieve_callback_data(&bot, dialogue.chat_id(), &q).await {
+        Ok(data) => data,
+        Err(_) => { return Ok(()); }
+    };
+
+    // Acknowledge the callback to remove the loading state
+    if let Err(e) = bot.answer_callback_query(q.id).await {
+        log::error!("Failed to answer callback query: {}", e);
+    }
+
+    // Deserialize the callback data into the enum
+    let callback = match match_callback_data(&bot, dialogue.chat_id(), &q.from.username, &data, &prefix).await {
+        Ok(callback) => callback,
+        Err(_) => { return Ok(()); }
+    };
+    
+    match callback {
+        PlanCallbacks::Toggle { id: parsed_avail_uuid} => {
+            // plan or unplan users
+            // if currently planned -> unplan user
+            // if currently unplanned -> plan user
+            if changes.contains(&parsed_avail_uuid) {
+                changes.remove(&parsed_avail_uuid);
+            } else {
+                changes.insert(parsed_avail_uuid);
+            }
+            
+            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
+            handle_re_show_options(
+                &bot, &dialogue, &q.from.username,
+                user_details, selected_date, changes, role_type,
+                prefix, start, utils::MAX_SHOW_ENTRIES, change_msg_id, &pool
+            ).await?;
+        }
+        PlanCallbacks::Cancel => {
+            log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
+            handle_re_show_options(
+                &bot, &dialogue, &q.from.username,
+                user_details, selected_date, changes, role_type,
+                prefix, start, utils::MAX_SHOW_ENTRIES, change_msg_id, &pool
+            ).await?;
+        }
+        _ => {
+            
+        }
+    }
+
+    Ok (())
 }
