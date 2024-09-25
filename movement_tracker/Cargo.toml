@@ -6,8 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#axum for health check endpoint
+#axum and tower for health check endpoint, as well as teloxide webhooks
 axum = "0.7.6"
+tower = "0.5.1"
+tower-http = { version = "0.6.1", features = ["trace"] }
 #teloxide dependencies for interaction with the telegram bot api
 teloxide = { version = "0.13", features = ["macros", "webhooks-axum"] }
 log = "0.4"
