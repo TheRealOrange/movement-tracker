@@ -22,9 +22,9 @@ use callback_data::CallbackDataHandler;
 enum ForecastCallbackData {
     // View range Actions
     ViewNextWeek,
-    ViewOneMonth,
-    ViewTwoMonths,
-    ViewAll,
+    ViewThisMonth,
+    ViewNextMonth,
+    IncNextMonth,
 
     // Select Role Actions
     ChangeRole { role_type: RoleType },
@@ -55,14 +55,16 @@ async fn display_availability_forecast(
         .collect();
 
     let mut view_range: Vec<Vec<InlineKeyboardButton>> = Vec::new();
+    let this_month_str = Local::now().format("%b").to_string().to_uppercase();
+    let next_month_str = utils::add_month_safe(Local::now().date_naive(), 1).format("%b").to_string().to_uppercase();
     view_range.push(
-        [("NEXT WEEK", ForecastCallbackData::ViewNextWeek), ("1 MONTH", ForecastCallbackData::ViewOneMonth)]
+        [("NEXT WEEK", ForecastCallbackData::ViewNextWeek), (&this_month_str, ForecastCallbackData::ViewThisMonth), (&next_month_str, ForecastCallbackData::ViewNextMonth)]
             .into_iter()
             .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
             .collect(),
     );
     view_range.push(
-        [("2 MONTHS", ForecastCallbackData::ViewTwoMonths), ("VIEW ALL", ForecastCallbackData::ViewAll)]
+        [("DONE", ForecastCallbackData::Done), ("NEXT MONTH", ForecastCallbackData::IncNextMonth)]
             .into_iter()
             .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
             .collect(),
@@ -71,7 +73,6 @@ async fn display_availability_forecast(
     let mut options: Vec<Vec<InlineKeyboardButton>> = Vec::new();
     options.push(change_view_roles);
     options.extend(view_range);
-    options.push(vec![InlineKeyboardButton::callback("DONE", ForecastCallbackData::Done.to_callback_data(&prefix))]);
 
     // Header for role type and period with formatted dates
     let mut output_text = format!(
@@ -97,9 +98,13 @@ async fn display_availability_forecast(
             .push(availability);
     }
 
+    let today = Local::now().date_naive();
     // Format the availability information grouped by year and month
     for ((year, month), availabilities) in availability_by_year_month {
-        output_text.push_str(&format!("**{} {}**\n", NaiveDate::from_ymd_opt(year, month, 1)?.format("%B"), year)); // Display month and year
+        let date_month = NaiveDate::from_ymd_opt(year, month, 1)?;
+        let year_month_str = format!("*{} {}*\n", date_month.format("%B"), year); // Display month and year
+        let cancel_if_past_str = if utils::last_day_of_month(date_month) < today { format!("~{}~", year_month_str).to_string() } else { year_month_str };
+        output_text.push_str(&cancel_if_past_str);
 
         let mut availability_by_date: std::collections::BTreeMap<NaiveDate, Vec<&AvailabilityDetails>> = std::collections::BTreeMap::new();
         for availability in availabilities {
@@ -111,7 +116,11 @@ async fn display_availability_forecast(
 
         // Format availability for each day in the month
         for (date, availabilities_for_day) in availability_by_date {
-            output_text.push_str(&format!("__{}__\n", date.format("%b %d"))); // Format as "Sep 05"
+            let day_str = format!("__{}__\n", date.format("%b %d")); // Format as "Sep 05"
+            let cancel_if_day_past_str = if date < today { format!("~{}~", day_str).to_string() } else { day_str };
+            output_text.push_str(&cancel_if_day_past_str);
+            
+            let mut per_day: String;
 
             for availability in availabilities_for_day {
                 let planned_str = if availability.planned { " \\(PLANNED\\)" } else { "" };
@@ -140,7 +149,7 @@ async fn display_availability_forecast(
                     saf100_str.to_string()
                 };
 
-                output_text.push_str(&format!(
+                per_day = format!(
                     "\\- {} __{}__{}{}{}{}\n",
                     availability.ops_name,
                     availability.ict_type.as_ref(),
@@ -148,7 +157,13 @@ async fn display_availability_forecast(
                     avail,
                     usrtype_str,
                     remarks_str
-                ));
+                );
+
+                if availability.avail < Local::now().date_naive() {
+                    output_text.push_str(&format!("~{}~", per_day));
+                } else {
+                    output_text.push_str(&per_day);
+                }
             }
             output_text.push('\n'); // Add space between dates
         }
@@ -286,27 +301,22 @@ pub(super) async fn forecast_view(
             return Ok(());
         }
         ForecastCallbackData::ViewNextWeek => {
-            new_start = start.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
+            new_start = Local::now().date_naive();
             new_end = end.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
         }
-        ForecastCallbackData::ViewOneMonth => {
-            new_start = Local::now().date_naive(); // Get today's date in the local timezone
-            // Add one month
-            new_end = utils::add_month_safe(start, 1);
+        ForecastCallbackData::ViewThisMonth => {
+            let (this_month_start, this_month_end) = utils::this_month_bound();
+            new_start = this_month_start;
+            new_end = this_month_end;
         }
-        ForecastCallbackData::ViewTwoMonths => {
-            new_start = Local::now().date_naive(); // Get today's date in the local timezone
-            // Add one month
-            new_end = utils::add_month_safe(start, 2);
+        ForecastCallbackData::ViewNextMonth => {
+            let (this_month_start, this_month_end) = utils::this_month_bound();
+            new_start = utils::add_month_safe(this_month_start, 1);
+            new_end = utils::add_month_safe(this_month_end, 1);
         }
-        ForecastCallbackData::ViewAll => {
-            match controllers::scheduling::get_furthest_avail_date_for_role(&pool, &role_type).await {
-                Ok(last_date) => {
-                    new_start = Local::now().date_naive(); // Get today's date in the local timezone
-                    new_end = last_date.unwrap_or(end);
-                }
-                Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await
-            }
+        ForecastCallbackData::IncNextMonth => {
+            new_start = utils::add_month_safe(new_start, 1);
+            new_end = utils::add_month_safe(new_end, 1);
         }
     }
 

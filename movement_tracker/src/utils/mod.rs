@@ -1,4 +1,4 @@
-use chrono::{Datelike, Local, NaiveDate};
+use chrono::{Datelike, Duration, Local, NaiveDate};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
@@ -502,15 +502,65 @@ pub(crate) fn format_failed_dates_as_markdown(failed_dates: &[String]) -> String
     formatted
 }
 
-pub(crate) fn add_month_safe(date: NaiveDate, months: u32) -> NaiveDate {
+macro_rules! floor_div {
+    ($a:expr, $b:expr) => {{
+        let quotient = $a / $b;
+        let remainder = $a % $b;
+        if remainder != 0 && ($a < 0) != ($b < 0) {
+            quotient - 1
+        } else {
+            quotient
+        }
+    }};
+}
+
+macro_rules! positive_mod {
+    ($a:expr, $b:expr) => {{
+        (($a % $b) + $b) % $b
+    }};
+}
+
+pub(crate) fn add_month_safe(date: NaiveDate, months: i32) -> NaiveDate {
     // Try to add month while considering the possibility of overflows (e.g., from January 31st to February)
-    let next_month = NaiveDate::from_ymd_opt(date.year() + ((date.month() - 1 + months)/12) as i32, (date.month()-1 + months) % 12 +1, date.day());
+    let next_month = NaiveDate::from_ymd_opt(date.year() + floor_div!(date.month0() as i32 + months, 12), positive_mod!(date.month0() as i32 + months, 12) as u32 +1, date.day());
 
     // Handle overflow by taking the last valid day of the next month if needed
     next_month.unwrap_or_else(|| {
-        let last_day_of_next_month = NaiveDate::from_ymd_opt(date.year() + ((date.month() + months)/12) as i32, (date.month() + months) % 12 +1, 1).and_then(|d| d.pred_opt()).expect("Invalid date");
+        let last_day_of_next_month = NaiveDate::from_ymd_opt(date.year() + floor_div!(date.month0() as i32 +1 + months, 12), positive_mod!(date.month0() as i32 +1 + months, 12) as u32 +1, 1).and_then(|d| d.pred_opt()).expect("Invalid date");
         last_day_of_next_month
     })
+}
+
+pub(crate) fn last_day_of_month(date: NaiveDate) -> NaiveDate {
+    // Get the current year and month
+    let current_year = date.year();
+    let current_month = date.month();
+    
+    // Calculate the first day of the next month
+    let (next_year, next_month) = if current_month == 12 {
+        (current_year + 1, 1) // If December, roll over to January of next year
+    } else {
+        (current_year, current_month + 1) // Otherwise, just go to the next month
+    };
+    
+    // Get the first day of the next month
+    let first_day_of_next_month = NaiveDate::from_ymd_opt(next_year, next_month, 1).expect("Error constructing date");
+
+    // Subtract one day to get the last day of the current month
+    first_day_of_next_month - Duration::days(1)
+}
+
+pub(crate) fn this_month_bound() -> (NaiveDate, NaiveDate) {
+    let today = Local::now().date_naive();
+
+    // Get the current year and month
+    let current_year = today.year();
+    let current_month = today.month();
+
+    // Get the first day of the current month
+    let first_day_of_month = NaiveDate::from_ymd_opt(current_year, current_month, 1).expect("Error constructing date");
+
+    (first_day_of_month, last_day_of_month(today))
 }
 
 pub(crate) fn escape_special_characters(input: &str) -> String {
