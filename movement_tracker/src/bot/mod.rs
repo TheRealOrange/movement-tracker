@@ -1,6 +1,7 @@
-use crate::bot::state::schema;
+use std::sync::Arc;
 use sqlx::PgPool;
 use state::State;
+
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::dispatching::Dispatcher;
 use teloxide::payloads::SendMessage;
@@ -8,7 +9,10 @@ use teloxide::prelude::*;
 use teloxide::requests::JsonRequest;
 use teloxide::{dptree, Bot};
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, ParseMode};
-use crate::{controllers, utils};
+use teloxide::update_listeners::UpdateListener;
+
+use crate::{controllers, healthcheck, utils, AppState};
+use crate::bot::state::schema;
 use callback_data::CallbackDataHandler;
 
 pub(self) mod commands;
@@ -26,7 +30,19 @@ mod saf100;
 pub(self) type MyDialogue = Dialogue<State, InMemStorage<State>>;
 pub(self) type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
-pub(crate) async fn init_bot(bot: Bot, pool: PgPool) {
+// Ensure that U implements UpdateListener with the required associated types
+pub(crate) async fn init_bot<U>(
+    bot: Bot,
+    pool: PgPool,
+    listener: U,
+    app_state: Arc<AppState>
+)
+where
+    U: UpdateListener + Send + 'static,
+    <U as UpdateListener>::Err: std::fmt::Debug,
+{
+    let error_handler = healthcheck::bot::HealthCheckErrorHandler::new(app_state.clone());
+
     Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
             InMemStorage::<State>::new(),
@@ -34,7 +50,7 @@ pub(crate) async fn init_bot(bot: Bot, pool: PgPool) {
         ])
         .enable_ctrlc_handler()
         .build()
-        .dispatch()
+        .dispatch_with_listener(listener, error_handler)
         .await;
 }
 

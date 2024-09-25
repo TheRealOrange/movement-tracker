@@ -3,23 +3,40 @@ mod controllers;
 pub(crate) mod types;
 mod utils;
 mod notifier;
+mod healthcheck;
 
 use std::env;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
+use std::sync::Arc;
+use axum::Router;
+use axum::routing::get;
 use sqlx::PgPool;
-use crate::controllers::db;
+
 use teloxide::prelude::*;
+use crate::controllers::db;
 use crate::types::{RoleType, UsrType};
-use warp::Filter;
+
+use tokio::sync::Mutex;
+
+#[derive(Clone)]
+struct AppState {
+    db_pool: PgPool,
+    notifier_status: Arc<Mutex<bool>>,
+    audit_status: Arc<Mutex<bool>>,
+    bot_health: Arc<Mutex<bool>>,
+    bot: Bot,
+    bot_health_check_active: bool
+}
 
 #[tokio::main]
 async fn main() {
     // Check if .env file exists
     if Path::new(".env").exists() {
         dotenvy::dotenv().expect("Failed to load .env file");
-        println!("Loaded environment variables from .env file");
+        log::info!("Loaded environment variables from .env file");
     } else {
-        println!("No .env file found, using environment variables");
+        log::warn!("No .env file found, using environment variables");
     }
 
     pretty_env_logger::init_timed();
@@ -38,29 +55,127 @@ async fn main() {
 
     log::info!("Starting bot and scheduled notifications...");
 
+    // Initialize the Telegram Bot
     let bot = Bot::from_env();
 
-    // Clone the bot and conn_pool for the notifier task
+    // Check if BOT_HEALTH_CHECK_CHAT_ID is set at startup
+    let bot_health_check_active = match env::var("BOT_HEALTH_CHECK_CHAT_ID") {
+        Ok(chat_id_env) => {
+            match chat_id_env.parse() {
+                Ok(id) => {
+                    match bot.get_chat(ChatId(id)).await {
+                        Ok(chat) => {
+                            log::info!("Chat validation successful for chat ID ({}).", chat.id);
+                            log::info!("BOT_HEALTH_CHECK_CHAT_ID is set and valid. Bot health check will be active.");
+                            true
+                        }
+                        Err(e) => {
+                            log::error!("Unable to retrieve chat with ID ({}). Please ensure the bot has been added to the healthcheck chat: {}", id, e);
+                            false
+                        }
+                    }
+                }
+                Err(_) => {
+                    log::error!("Invalid BOT_HEALTH_CHECK_CHAT_ID value: {}", chat_id_env);
+                    false
+                }
+            }
+        }
+        Err(_) => {
+            log::warn!("BOT_HEALTH_CHECK_CHAT_ID is not set. Bot health check will be inactive.");
+            false
+        }
+    };
+
+    // Initialize the Shared Application State
+    let app_state = Arc::new(AppState {
+        db_pool: conn_pool.clone(),
+        notifier_status: Arc::new(Mutex::new(true)),
+        audit_status: Arc::new(Mutex::new(true)),
+        bot_health: Arc::new(Mutex::new(true)),
+        bot: bot.clone(),
+        bot_health_check_active, // Set bot health check active flag
+    });
+
+    // Clone the State for Notifier and Audit Tasks
+    let notifier_app_state = app_state.clone();
+    let audit_app_state = app_state.clone();
+
+    // Clone bot for the notifier task
     let notifier_bot = bot.clone();
-    let notifier_conn_pool = conn_pool.clone();
 
-    // Start the notifier task
+    // Spawn the Notifier Task
     tokio::spawn(async move {
-        notifier::scheduled::start_notifier(notifier_bot, notifier_conn_pool).await;
+        if let Err(e) = notifier::scheduled::start_notifier(notifier_bot, notifier_app_state.clone()).await {
+            log::error!("Notifier task encountered an error: {}", e);
+            let mut notifier = notifier_app_state.notifier_status.lock().await;
+            *notifier = false;
+        }
     });
 
-    // Define the health check route
-    let health_route = warp::path("health").map(|| "OK");
-
-    // Start the health check server on a separate task
+    // Spawn the Audit Task
     tokio::spawn(async move {
-        warp::serve(health_route)
-            .run(([0, 0, 0, 0], 8080))
-            .await;
+        if let Err(e) = healthcheck::audit::start_audit_task(audit_app_state.clone()).await {
+            log::error!("Audit task encountered an error: {}", e);
+            let mut audit = audit_app_state.audit_status.lock().await;
+            *audit = false;
+        }
     });
 
-    // Start the bot
-    bot::init_bot(bot, conn_pool).await;
+    // Spawn the Health Monitoring Task
+    let health_monitor_state = app_state.clone();
+    tokio::spawn(async move {
+        healthcheck::monitor::start_health_monitor(health_monitor_state).await;
+    });
+
+    // **12. Start Health Check Server on Port 8080**
+    let health_route = Router::new()
+        .route("/health", get(healthcheck::handler::health_check_handler));
+
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080)).await.unwrap();
+        axum::serve(listener, health_route).await.expect("Failed to run health check server");
+    });
+
+    // Determine which listener to use based on the environment variable
+    if let Ok(webhook_port_str) = env::var("WEBHOOK_PORT") {
+        // Webhook Setup
+
+        // Parse the webhook port
+        let webhook_port: u16 = webhook_port_str
+            .parse()
+            .expect("WEBHOOK_PORT must be a valid u16 integer");
+
+        // Retrieve the HOST environment variable
+        let host = std::env::var("HOST")
+            .expect("HOST environment variable must be set for webhooks");
+
+        // Construct the webhook URL
+        let webhook_url = format!("https://{host}/webhook")
+            .parse()
+            .expect("Invalid webhook URL");
+
+        // Define the address to bind the webhook server
+        let addr = ([0, 0, 0, 0], webhook_port).into();
+
+        log::info!("Setting up webhook at {}", webhook_url);
+
+        // Initialize the Webhook Listener Using Axum
+        let listener = teloxide::update_listeners::webhooks::axum(
+            bot.clone(),
+            teloxide::update_listeners::webhooks::Options::new(addr, webhook_url)
+        )
+            .await
+            .expect("Failed to set up webhook");
+        
+        bot::init_bot(bot, conn_pool, listener, app_state.clone()).await;
+    } else {
+        // Initialize polling listener
+        log::info!("WEBHOOK_PORT not set. Falling back to long polling.");
+
+        let listener = teloxide::update_listeners::polling_default(bot.clone()).await;
+        bot::init_bot(bot, conn_pool, listener, app_state.clone()).await;
+    };
 }
 
 

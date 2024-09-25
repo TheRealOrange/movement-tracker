@@ -6,10 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#warp for health check endpoint
-warp = "0.3"
+#axum for health check endpoint
+axum = "0.7.6"
 #teloxide dependencies for interaction with the telegram bot api
-teloxide = { version = "0.13", features = ["macros"] }
+teloxide = { version = "0.13", features = ["macros", "webhooks-axum"] }
 log = "0.4"
 pretty_env_logger = "0.5.0"
 #sqlx library for connection to postgres database
@@ -29,6 +29,7 @@ callback_data = { path = "../libs/callback_data" }
 # dependencies for proc macro
 rmp-serde = "1.3"
 base64 = "0.22.1"
+futures = "0.3.30"
 
 [dependencies.uuid]
 version = "1.10.0"
