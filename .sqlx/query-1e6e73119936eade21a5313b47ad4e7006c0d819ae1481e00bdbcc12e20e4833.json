@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE scheduled_notifications\n                SET sent = TRUE\n                WHERE id = $1;\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1e6e73119936eade21a5313b47ad4e7006c0d819ae1481e00bdbcc12e20e4833"
+}

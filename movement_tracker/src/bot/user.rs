@@ -482,7 +482,7 @@ pub(super) async fn user_edit_prompt(
                         bot.send_message(dialogue.chat_id(), format!(
                             "Updated user details:\n{}\nADDED: _{}_\nUPDATED: _{}_",
                             changes_message,
-                            utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string()),
+                            utils::escape_special_characters(&user_updated.created.format("%b-%d-%Y %H:%M:%S").to_string()),
                             utils::escape_special_characters(&user_updated.updated.format("%b-%d-%Y %H:%M:%S").to_string())
                         )).parse_mode(ParseMode::MarkdownV2),
                         &q.from.username,

@@ -473,7 +473,7 @@ pub(super) async fn saf100_confirm(
                         q.from.id.0 as i64
                     ).await;
                     
-                    let mut failed;
+                    let failed;
                     let mut retrieved: Option<Usr> = None;
                     
                     match controllers::user::get_user_by_uuid(&pool, availability.user_id).await {

@@ -162,7 +162,7 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
 
     let mut output_text = String::new();
     if existing.is_empty() {
-        output_text.push_str("You do not currently have any upcoming available dates indicated.");
+        output_text.push_str("You do not currently have any upcoming available dates indicated\\.");
     } else {
         output_text.push_str("Here are the upcoming dates for which you have indicated availability:\n");
         for availability in existing {
@@ -175,26 +175,31 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             } else {
                 "".to_string()
             };
+            
+            let escaped_truncated_remarks = utils::escape_special_characters(&truncated_remarks);
 
             // Format date as "MMM-DD" (3-letter month)
-            let formatted_date = availability.avail.format("%b-%d").to_string();
+            let formatted_date = utils::escape_special_characters(&availability.avail.format("%b-%d").to_string());
             
+            let saf_100_state = if availability.saf100 {
+                " *SAF100 Issued*"
+            } else { "" };
             let state = if availability.is_valid == false && availability.planned == true {
-                " (UNAVAIL, PLANNED)"
+                " *\\(UNAVAIL\\, PLANNED\\)*"
             } else {
                 if availability.planned {
-                    " (PLANNED)"
+                    " *\\(PLANNED\\)*"
                 } else { "" }
             };
 
             output_text.push_str(&format!(
-                "- {}: {}{}{}\n",
-                formatted_date, availability.ict_type.as_ref(), state, truncated_remarks
+                "\\- `{}` : {}{}\n{}{}\n",
+                formatted_date, availability.ict_type.as_ref(), state, escaped_truncated_remarks, saf_100_state
             ));
         }
     }
     
-    send_or_edit_msg(bot, chat_id, username, msg_id, output_text, Some(InlineKeyboardMarkup::new(options)), None).await
+    send_or_edit_msg(bot, chat_id, username, msg_id, output_text, Some(InlineKeyboardMarkup::new(options)), Some(ParseMode::MarkdownV2)).await
 }
 
 async fn update_availability_edit(

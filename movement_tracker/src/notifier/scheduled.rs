@@ -1,22 +1,34 @@
+use std::sync::Arc;
 use crate::types::{Availability, ScheduledNotifications, Usr, UsrType};
 use sqlx::PgPool;
 use std::time::Duration;
 use teloxide::prelude::*;
-use crate::utils;
+use crate::{utils, AppState};
 
-pub(crate) async fn start_notifier(bot: Bot, conn: PgPool) {
+pub(crate) async fn start_notifier(bot: Bot, state: Arc<AppState>) -> Result<(), sqlx::Error> {
     loop {
         // Wait for a specified duration (e.g., 60 seconds)
         tokio::time::sleep(Duration::from_secs(60)).await;
 
-        // Process scheduled notifications
-        if let Err(e) = process_scheduled_notifications(&conn, &bot).await {
-            log::error!("Error processing scheduled notifications: {}", e);
+        // Attempt to Process Scheduled Notifications
+        match process_scheduled_notifications(&state.db_pool, &bot).await {
+            Ok(_) => {
+                // Set Notifier Status to Healthy
+                let mut notifier = state.notifier_status.lock().await;
+                *notifier = true;
+                log::info!("Notifier task processed notifications successfully.");
+            }
+            Err(e) => {
+                // Set Notifier Status to Unhealthy
+                let mut notifier = state.notifier_status.lock().await;
+                *notifier = false;
+                log::error!("Notifier task failed to process notifications: {}", e);
+            }
         }
     }
 }
 
-pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) -> Result<(), sqlx::Error> {
+async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) -> Result<(), sqlx::Error> {
     // Start a transaction
     let mut tx = conn.begin().await?;
 
@@ -53,7 +65,8 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
         // Process each notification
         for notification in notifications {
             // Fetch associated availability
-            let availability = sqlx::query_as!(
+            log::debug!("Fetching availability with ID: {}", notification.avail_id);
+            let availability = match sqlx::query_as!(
                 Availability,
                 r#"
                 SELECT
@@ -74,11 +87,21 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
                 "#,
                 notification.avail_id
             )
-                .fetch_one(&mut *tx)
-                .await?;
+                .fetch_optional(&mut *tx)
+                .await? {
+                Some(avail) => avail,
+                None => {
+                    log::warn!(
+                        "Availability with ID {} not found or invalid. Skipping notification ID {}.",
+                        notification.avail_id, notification.id
+                    );
+                    continue; // Skip processing this notification
+                },
+            };
 
             // Fetch user details
-            let user = sqlx::query_as!(
+            log::debug!("Fetching user with ID: {}", availability.user_id);
+            let user = match sqlx::query_as!(
                 Usr,
                 r#"
                 SELECT
@@ -97,8 +120,17 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
                 "#,
                 availability.user_id
             )
-                .fetch_one(&mut *tx)
-                .await?;
+                .fetch_optional(&mut *tx)
+                .await? {
+                Some(u) => u,
+                None => {
+                    log::warn!(
+                        "User with ID {} not found or invalid. Skipping notification ID {}.",
+                        availability.user_id, notification.id
+                    );
+                    continue; // Skip processing this notification
+                },
+            };
 
             // Prepare detailed notification message
             let message_text = format_detailed_notification(&availability, &user)
@@ -124,7 +156,7 @@ pub(crate) async fn process_scheduled_notifications(conn: &PgPool, bot: &Bot) ->
             sqlx::query!(
                 r#"
                 UPDATE scheduled_notifications
-                SET sent = TRUE, updated = NOW()
+                SET sent = TRUE
                 WHERE id = $1;
                 "#,
                 notification.id

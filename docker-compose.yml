@@ -47,16 +47,18 @@ services:
       DEFAULT_TELEGRAM_ID: ${DEFAULT_TELEGRAM_ID}
       DEFAULT_OPS_NAME: ${DEFAULT_OPS_NAME}
       DEFAULT_USER_NAME: ${DEFAULT_USER_NAME}
+      BOT_HEALTH_CHECK_CHAT_ID: ${BOT_HEALTH_CHECK_CHAT_ID}
     depends_on:
       db:
         condition: service_healthy
     command: sh -c "until nc -z db 5432; do echo waiting for postgres; sleep 2; done && /app/movement_tracker"
     restart: always
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 2s
-      timeout: 3s
-      retries: 2
+      test: [ "CMD-SHELL", "curl -f http://localhost:8080/health > /dev/null 2>&1" ] # Silenced output
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 volumes:
   database_data:
