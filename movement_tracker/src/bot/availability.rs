@@ -337,7 +337,7 @@ async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Opti
         .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
     
     let message_text = format!(
-        "You have already been planned on __{}__{}\\.\nConfirm rescind availability?", 
+        "⚠️ You have already been planned on __{}__{}\\.\nConfirm rescind availability?", 
         entry.avail.format("%b\\-%d\\-%Y"),
         if entry.saf100 { " *\\(SAF100 ISSUED\\)*" } else { "" }
     );
@@ -367,8 +367,8 @@ async fn delete_availability_entry_and_go_back(
                         notifier::emit::availability_notifications(
                             &bot,
                             format!(
-                                "{}{} has specified they are UNAVAIL on {}",
-                                details.ops_name,
+                                "`{}`{} has specified they are *UNAVAIL* on {}",
+                                utils::escape_special_characters(&details.ops_name),
                                 if details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                                 utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string()),
                             ).as_str(),
@@ -381,8 +381,8 @@ async fn delete_availability_entry_and_go_back(
                             notifier::emit::conflict_notifications(
                                 &bot,
                                 format!(
-                                    "{}{} has specified they are UNAVAIL on {}\\, but they are PLANNED{}",
-                                    details.ops_name,
+                                    "`{}`{} has specified they are *UNAVAIL* on {}\\, but they are *PLANNED* ⚠️ {}",
+                                    utils::escape_special_characters(&details.ops_name),
                                     if details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                                     utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string()),
                                     if details.saf100 { " SAF100 ISSUED" } else { "" }
@@ -490,7 +490,7 @@ async fn modify_availability_and_go_back(
                                 ));
                             }
                             changes.push(format!(
-                                "*Remarks modified from:*\n{}⬇️\n{}",
+                                "*Remarks modified from:*\n{}\n  ⬇️\n{}",
                                 utils::escape_special_characters(&original_availability.remarks.unwrap_or("None".into())),
                                 utils::escape_special_characters(&updated.remarks.unwrap_or("None".into()))
                             ));
