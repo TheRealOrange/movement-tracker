@@ -9,8 +9,12 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
-use axum::Router;
+
+use axum::{Extension, Router};
 use axum::routing::get;
+use tower_http::{trace::TraceLayer};
+use tower::ServiceBuilder;
+
 use sqlx::PgPool;
 
 use teloxide::prelude::*;
@@ -128,9 +132,14 @@ async fn main() {
         healthcheck::monitor::start_health_monitor(health_monitor_state).await;
     });
 
-    // **12. Start Health Check Server on Port 8080**
+    // Start Health Check Server on Port 8080
     let health_route = Router::new()
-        .route("/health", get(healthcheck::handler::health_check_handler));
+        .route("/health", get(healthcheck::handler::health_check_handler))
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(Extension(app_state.clone()))
+        );  // Add shared state;
 
     tokio::spawn(async move {
         let listener = tokio::net::TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080)).await.unwrap();
