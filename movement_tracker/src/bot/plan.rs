@@ -358,7 +358,7 @@ fn get_date_availability_text(
     message
 }
 
-async fn display_availability_details(bot: &Bot, chat_id: ChatId, username: &Option<String>, availability: AvailabilityDetails, prefix: &String, msg_id: Option<MessageId>) -> Option<MessageId> {
+async fn display_availability_details(bot: &Bot, chat_id: ChatId, username: &Option<String>, availability: AvailabilityDetails, changes: &HashSet<Uuid> ,prefix: &String, msg_id: Option<MessageId>) -> Option<MessageId> {
     let plan_button_text = if availability.planned { "UNPLAN" } else { "PLAN" };
     let options = [(plan_button_text, PlanCallbacks::Toggle { id: availability.id }), ("BACK", PlanCallbacks::Cancel)]
         .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
@@ -384,14 +384,16 @@ async fn display_availability_details(bot: &Bot, chat_id: ChatId, username: &Opt
     else if availability.planned && availability.usr_type == UsrType::NS { " *PENDING SAF100*" }
     else { "" };
     
-    let plan_str = if availability.planned { "PLANNED" } else { "UNPLANNED" };
-    let change_plan_str = if !availability.planned { "PLANNED" } else { "UNPLANNED" };
+    let plan_str = get_planned_change_text(&availability, changes);
+    let is_in_changes = changes.contains(&availability.id);
+    let change_plan_str = if !(is_in_changes ^ availability.planned) { "PLANNED" } else { "UNPLANNED" };
+    let change_back_str = if is_in_changes { "back " } else { "" };
     
     let message_text = format!(
-        "`{}`{} has indicated they are {} on {}{}\n{}\nPlan Status: *{}* {}\n\nDo you want to change planned status to *{}*?",
+        "`{}`{} has indicated they are {} on {}{}\n{}\nPlan Status: *{}* {}\n\nDo you want to change planned status {}to *{}*?",
         utils::escape_special_characters(&availability.ops_name), usrtype_str,
         avail_str, date_str, conflict_str,
-        remarks_str, plan_str, saf100_str, change_plan_str
+        remarks_str, plan_str, saf100_str, change_back_str, change_plan_str
     );
     
     send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(InlineKeyboardMarkup::new([options])), Some(ParseMode::MarkdownV2)).await
@@ -924,7 +926,7 @@ pub(super) async fn plan_view(
             match controllers::scheduling::get_availability_details_by_uuid(&pool, parsed_avail_uuid).await {
                 Ok(availability_entry) => {
                     log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-                    match display_availability_details(&bot, dialogue.chat_id(), &q.from.username, availability_entry, &prefix, None).await {
+                    match display_availability_details(&bot, dialogue.chat_id(), &q.from.username, availability_entry, &changes, &prefix, None).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(change_msg_id) => {
                             dialogue.update(State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start  }).await?
