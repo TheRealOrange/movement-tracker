@@ -14,7 +14,7 @@ use super::register::{register, register_complete, register_name, register_ops_n
 use super::user::{user, user_edit_admin, user_edit_delete, user_edit_name, user_edit_ops_name, user_edit_prompt, user_edit_role, user_edit_type, user_select};
 use crate::bot::availability::{availability, availability_add_callback, availability_add_change_type, availability_add_complete, availability_add_message, availability_add_remarks, availability_delete_confirm, availability_modify, availability_modify_remarks, availability_modify_type, availability_select, availability_view, AvailabilityAction};
 use crate::bot::forecast::{forecast, forecast_view};
-use crate::bot::plan::{plan, plan_select, plan_view};
+use crate::bot::plan::{plan, plan_select, plan_view, plan_view_availability};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::notify::{notify, notify_settings};
@@ -187,6 +187,16 @@ pub(super) enum State {
         prefix: String,
         start: usize
     },
+    PlanViewAvailability {
+        msg_id: MessageId,
+        change_msg_id: MessageId,
+        user_details: Option<Usr>,
+        selected_date: Option<NaiveDate>,
+        changes: HashSet<Uuid>,
+        role_type: RoleType,
+        prefix: String,
+        start: usize
+    },
     // TODO: States meant for SANS attendance confirmation
     // States meant for editing users
     UserSelect,
@@ -324,6 +334,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(press_button_prompt))
         .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(press_button_prompt))
+        .branch(case![State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
@@ -353,6 +364,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::UserEditAdmin { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_admin))
             .branch(case![State::UserEditDeleteConfirm { msg_id, change_msg_id, user_details, prefix }].endpoint(user_edit_delete))
             .branch(case![State::PlanView { msg_id, user_details, selected_date, availability_list, changes, role_type, prefix, start }].endpoint(plan_view))
+            .branch(case![State::PlanViewAvailability { msg_id, change_msg_id, user_details, selected_date, changes, role_type, prefix, start }].endpoint(plan_view_availability))
             .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(saf100_select))
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
             .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
