@@ -31,8 +31,8 @@ pub(crate) async fn start_health_monitor(state: Arc<AppState>) {
     let mut previous_status = CurrentHealthStatus::new();
 
     loop {
-        // Wait for a specified interval (e.g., 60 seconds)
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        // Wait for a specified interval (e.g., 120 seconds)
+        tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
 
         // Check current health status
         let current_status = check_health(&state).await;
