@@ -80,8 +80,8 @@ fn get_availability_edit_keyboard(
         .iter()
         .filter_map(|entry| {
             let truncated_remarks = if let Some(remarks) = &entry.remarks {
-                if remarks.chars().count() > 8 {
-                    format!(", {}...", remarks.chars().take(8).collect::<String>())
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_BUTTON {
+                    format!(", {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_BUTTON).collect::<String>())
                 } else {
                     format!(", {}", remarks)
                 }
@@ -167,8 +167,8 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
         output_text.push_str("Here are the upcoming dates for which you have indicated availability:\n");
         for availability in existing {
             let truncated_remarks = if let Some(remarks) = &availability.remarks {
-                if remarks.chars().count() > 10 {
-                    format!(", {}...", remarks.chars().take(10).collect::<String>())
+                if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_TEXT {
+                    format!(", {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_TEXT).collect::<String>())
                 } else {
                     format!(", {}", remarks)
                 }
@@ -653,7 +653,7 @@ pub(super) async fn availability_view(
     let prefix = generate_prefix();
 
     let start = 0;
-    let show = 8;
+    let show = utils::MAX_SHOW_ENTRIES;
     
     match callback {
         AvailabilityCallbacks::Add => {
@@ -1075,11 +1075,11 @@ pub(super) async fn availability_select(
     
     match callback {
         AvailabilityCallbacks::Prev { action } => {
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 -8) as usize, 8, action, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, max(0, start as i64 - utils::MAX_SHOW_ENTRIES as i64) as usize, utils::MAX_SHOW_ENTRIES, action, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::Next { action } => {
             let entries_len = availability_list.len();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+8 < entries_len { start+8 } else { start }, 8, action, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, availability_list, prefix, if start+utils::MAX_SHOW_ENTRIES < entries_len { start+utils::MAX_SHOW_ENTRIES } else { start }, utils::MAX_SHOW_ENTRIES, action, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::Cancel => {
             send_msg(
@@ -1116,7 +1116,7 @@ pub(super) async fn availability_select(
                                     Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
                                 }
                             } else {
-                                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+                                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, utils::MAX_SHOW_ENTRIES, action, &pool, Some(msg_id)).await?;
                             }
                         }
                     }
@@ -1194,11 +1194,11 @@ pub(super) async fn availability_modify(
                     Some(new_msg_id) => dialogue.update(State::AvailabilityDeleteConfirm { msg_id: new_msg_id, prefix, availability_entry, action, start }).await?
                 }
             } else {
-                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+                delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, utils::MAX_SHOW_ENTRIES, action, &pool, Some(msg_id)).await?;
             }
         }
         AvailabilityCallbacks::Back => {
-            handle_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, start, 8, action, &pool, Some(msg_id)).await?;
+            handle_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, start, utils::MAX_SHOW_ENTRIES, action, &pool, Some(msg_id)).await?;
         }
         _ => {
             send_msg(
@@ -1238,7 +1238,7 @@ pub(super) async fn availability_modify_remarks(
     match msg.text().map(ToOwned::to_owned) {
         Some(input_remarks) => {
             log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
-            modify_availability_and_go_back(&bot, &dialogue, &user.username, user.id.0, availability_entry, start, 8, action, None, Some(input_remarks), &pool, None).await?;
+            modify_availability_and_go_back(&bot, &dialogue, &user.username, user.id.0, availability_entry, start, utils::MAX_SHOW_ENTRIES, action, None, Some(input_remarks), &pool, None).await?;
         }
         None => {
             send_msg(
@@ -1293,7 +1293,7 @@ pub(super) async fn availability_modify_type(
                     bot.send_message(dialogue.chat_id(), format!("Selected type: `{}`", ict_type_enum.as_ref())).parse_mode(ParseMode::MarkdownV2),
                     &q.from.username,
                 ).await;
-                modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, Some(ict_type_enum), None, &pool, Some(msg_id)).await?;
+                modify_availability_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, utils::MAX_SHOW_ENTRIES, action, Some(ict_type_enum), None, &pool, Some(msg_id)).await?;
             } else {
                 send_msg(
                     bot.send_message(dialogue.chat_id(), "Invalid option. Type /cancel to abort."),
@@ -1347,7 +1347,7 @@ pub(super) async fn availability_delete_confirm(
     
     match callback {
         AvailabilityCallbacks::ConfirmYes => {
-            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, 8, action, &pool, Some(msg_id)).await?;
+            delete_availability_entry_and_go_back(&bot, &dialogue, &q.from.username, q.from.id.0, availability_entry, start, utils::MAX_SHOW_ENTRIES, action, &pool, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::ConfirmNo => {
             match display_availability_edit_prompt(&bot, dialogue.chat_id(), &q.from.username, &availability_entry, &prefix, msg_id).await {

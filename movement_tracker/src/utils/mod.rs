@@ -527,6 +527,10 @@ pub(crate) fn escape_special_characters(input: &str) -> String {
 
 pub(crate) const MAX_NAME_LENGTH: usize = 64;
 pub(crate) const MAX_OPS_NAME_LENGTH: usize = 10;
+pub(crate) const MAX_SHOW_ENTRIES: usize = 6;
+
+pub(crate) const MAX_REMARKS_SHOWN_CHARS_BUTTON: usize = 8;
+pub(crate) const MAX_REMARKS_SHOWN_CHARS_TEXT: usize = 15;
 
 pub(crate) fn is_valid_name(name: &str) -> bool {
     name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace())

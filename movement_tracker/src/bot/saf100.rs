@@ -303,11 +303,11 @@ pub(super) async fn saf100_select(
         Saf100CallbackData::SeeAvail => {
             // Determine the action based on selection
             let action = "SAF100_SEE_AVAIL".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, 8, action, Some(msg_id), &pool).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, utils::MAX_SHOW_ENTRIES, action, Some(msg_id), &pool).await?;
         }
         Saf100CallbackData::SeePlanned => {
             let action = "SAF100_SEE_PLANNED".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, 8, action, Some(msg_id), &pool).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, utils::MAX_SHOW_ENTRIES, action, Some(msg_id), &pool).await?;
         }
         Saf100CallbackData::Cancel => {
             // Handle cancellation by reverting to the start state
@@ -365,7 +365,7 @@ pub(super) async fn saf100_view(
         Err(_) => { return Ok(()); }
     };
 
-    let show = 8;
+    let show = utils::MAX_SHOW_ENTRIES;
 
     match callback {
         Saf100CallbackData::Prev => {
@@ -531,14 +531,14 @@ pub(super) async fn saf100_confirm(
                     
                     // Send or edit message
                     send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), message_text, None, Some(ParseMode::MarkdownV2)).await;
-                    handle_re_show_options(&bot, &dialogue, &q.from.username, start, 8, action, None, &pool).await?;
+                    handle_re_show_options(&bot, &dialogue, &q.from.username, start, utils::MAX_SHOW_ENTRIES, action, None, &pool).await?;
                 }
                 Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), &q.from.username).await,
             }
         }
         Saf100CallbackData::ConfirmNo => {
             // logic to go back
-            handle_re_show_options(&bot, &dialogue, &q.from.username, start, 8, action, Some(msg_id), &pool).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, start, utils::MAX_SHOW_ENTRIES, action, Some(msg_id), &pool).await?;
         }
         _ => {
             send_msg(
