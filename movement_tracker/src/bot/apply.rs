@@ -301,7 +301,7 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
             // Generate random prefix to make the IDs only applicable to this dialogue instance
             let prefix: String = generate_prefix();
 
-            match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, 8, None)
+            match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, utils::MAX_SHOW_ENTRIES, None)
                 .await {
                 Ok(msg_id) => {
                     match msg_id {
@@ -354,11 +354,11 @@ pub(super) async fn apply_view(
 
     match callback {
         ApplyCallbacks::Prev => {
-            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, max(0, start as i64 - 8) as usize, 8, msg_id).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, max(0, start as i64 - utils::MAX_SHOW_ENTRIES as i64) as usize, utils::MAX_SHOW_ENTRIES, msg_id).await?;
         }
         ApplyCallbacks::Next => {
             let entries_len = applications.len();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, if start+8 < entries_len { start+8 } else { start }, 8, msg_id).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, applications, prefix, if start+utils::MAX_SHOW_ENTRIES < entries_len { start+utils::MAX_SHOW_ENTRIES } else { start }, utils::MAX_SHOW_ENTRIES, msg_id).await?;
         }
         ApplyCallbacks::Cancel => {
             send_msg(
