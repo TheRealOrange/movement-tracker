@@ -209,7 +209,7 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             };
 
             output_text.push_str(&format!(
-                "\\- `{}` : {}{}{}{}\n",
+                "\\- `{}` : {}{}{}{}\n\n",
                 formatted_date, availability.ict_type.as_ref(), state, truncated_remarks, saf_100_state
             ));
         }
