@@ -716,10 +716,10 @@ pub(super) async fn availability_view(
     
     match callback {
         AvailabilityCallbacks::PrevMonth => {
-            handle_show_availability(&bot, &dialogue, &q.from.username, q.from.id.0, utils::add_month_safe(month, -1), &pool, None).await?;
+            handle_show_availability(&bot, &dialogue, &q.from.username, q.from.id.0, utils::add_month_safe(month, -1), &pool, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::NextMonth => {
-            handle_show_availability(&bot, &dialogue, &q.from.username, q.from.id.0, utils::add_month_safe(month, 1), &pool, None).await?;
+            handle_show_availability(&bot, &dialogue, &q.from.username, q.from.id.0, utils::add_month_safe(month, 1), &pool, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::Add => {
             let avail_type = Ict::LIVE;
