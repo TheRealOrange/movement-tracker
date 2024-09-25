@@ -168,9 +168,9 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
         for availability in existing {
             let truncated_remarks = if let Some(remarks) = &availability.remarks {
                 if remarks.chars().count() > utils::MAX_REMARKS_SHOWN_CHARS_TEXT {
-                    format!("Remarks: {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_TEXT).collect::<String>())
+                    format!(", {}...", remarks.chars().take(utils::MAX_REMARKS_SHOWN_CHARS_TEXT).collect::<String>())
                 } else {
-                    format!("Remarks: {}", remarks)
+                    format!(", {}", remarks)
                 }
             } else {
                 "".to_string()
@@ -182,9 +182,8 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             let formatted_date = utils::escape_special_characters(&availability.avail.format("%b-%d").to_string());
             
             let saf_100_state = if availability.saf100 {
-                "\n *SAF100 Issued*"
+                " *SAF100 Issued*"
             } else { "" };
-            
             let state = if availability.is_valid == false && availability.planned == true {
                 " *\\(UNAVAIL\\, PLANNED\\)*"
             } else {
