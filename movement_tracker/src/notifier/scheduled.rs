@@ -16,7 +16,7 @@ pub(crate) async fn start_notifier(bot: Bot, state: Arc<AppState>) -> Result<(),
                 // Set Notifier Status to Healthy
                 let mut notifier = state.notifier_status.lock().await;
                 *notifier = true;
-                log::info!("Notifier task processed notifications successfully.");
+                log::debug!("Notifier task processed notifications successfully.");
             }
             Err(e) => {
                 // Set Notifier Status to Unhealthy

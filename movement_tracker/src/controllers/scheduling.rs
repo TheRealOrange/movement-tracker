@@ -223,9 +223,69 @@ pub(crate) async fn set_user_unavail(
     }
 }
 
+pub(crate) async fn get_availability_by_tele_id_and_dates(
+    conn: &PgPool,
+    tele_id: u64,
+    start: NaiveDate,
+    end: NaiveDate,
+) -> Result<Vec<Availability>, sqlx::Error> {
+    let result = sqlx::query_as!(
+        Availability,
+        r#"
+        SELECT
+            availability.id,
+            availability.usr_id AS user_id,
+            availability.avail,
+            availability.planned,
+            availability.ict_type AS "ict_type: _",
+            availability.remarks,
+            availability.saf100,
+            availability.attended,
+            availability.is_valid,
+            availability.created,
+            availability.updated
+        FROM availability
+        JOIN usrs ON usrs.id = availability.usr_id
+        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE
+          AND availability.avail >= $2
+          AND availability.avail <= $3
+          AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability
+        ORDER BY availability.avail ASC;
+        "#,
+        tele_id as i64,
+        start,
+        end
+    )
+        .fetch_all(conn)
+        .await;
+
+    match result {
+        Ok(availability_list) => {
+            log::info!(
+                "Found {} upcoming availability entries for tele_id ({}) within date range {} to {}",
+                availability_list.len(),
+                tele_id,
+                start,
+                end
+            );
+            Ok(availability_list)
+        }
+        Err(e) => {
+            log::error!(
+                "Error fetching upcoming availability for tele_id ({}) within date range {} to {}: {}",
+                tele_id,
+                start,
+                end,
+                e
+            );
+            Err(e)
+        }
+    }
+}
+
 pub(crate) async fn get_upcoming_availability_by_tele_id(
     conn: &PgPool,
-    tele_id: u64
+    tele_id: u64,
 ) -> Result<Vec<Availability>, sqlx::Error> {
     let today = Local::now().date_naive();  // Get today's date
 
@@ -247,8 +307,8 @@ pub(crate) async fn get_upcoming_availability_by_tele_id(
         FROM availability
         JOIN usrs ON usrs.id = availability.usr_id
         WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE
-        AND availability.avail >= $2
-        AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability
+          AND availability.avail >= $2
+          AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability
         ORDER BY availability.avail ASC;
         "#,
         tele_id as i64,
@@ -315,7 +375,7 @@ pub(crate) async fn get_upcoming_availability_details_by_tele_id(
     match result {
         Ok(availability_list) => {
             log::info!(
-                "Found {} upcoming availability entries with details for tele_id: {}",
+                "Found {} upcoming availability entries with details for tele_id ({})",
                 availability_list.len(),
                 tele_id
             );
@@ -323,7 +383,7 @@ pub(crate) async fn get_upcoming_availability_details_by_tele_id(
         }
         Err(e) => {
             log::error!(
-                "Error fetching upcoming availability details for tele_id {}: {}",
+                "Error fetching upcoming availability details for tele_id ({}): {}",
                 tele_id,
                 e
             );

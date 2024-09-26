@@ -63,7 +63,7 @@ pub(super) async fn check_bot_health(bot: &Bot, app_state: &AppState) -> Option<
     match bot.send_message(ChatId(chat_id), &timecode).await {
         Ok(sent_msg) => {
             // Log the success and assume the bot is healthy
-            log::info!(
+            log::debug!(
                 "Bot health check message sent to chat ID ({}): Message ID: ({}), Timecode: {}",
                 chat_id,
                 sent_msg.id,

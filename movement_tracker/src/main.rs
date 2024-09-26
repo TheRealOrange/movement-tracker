@@ -22,6 +22,7 @@ use crate::controllers::db;
 use crate::types::{RoleType, UsrType};
 
 use tokio::sync::Mutex;
+use crate::healthcheck::monitor::CurrentHealthStatus;
 
 #[derive(Clone)]
 struct AppState {
@@ -30,7 +31,8 @@ struct AppState {
     audit_status: Arc<Mutex<bool>>,
     bot_health: Arc<Mutex<bool>>,
     bot: Bot,
-    bot_health_check_active: bool
+    bot_health_check_active: bool,
+    health_status: Arc<Mutex<CurrentHealthStatus>>
 }
 
 #[tokio::main]
@@ -99,6 +101,7 @@ async fn main() {
         bot_health: Arc::new(Mutex::new(true)),
         bot: bot.clone(),
         bot_health_check_active, // Set bot health check active flag
+        health_status: Arc::new(Mutex::new(CurrentHealthStatus::new()))
     });
 
     // Clone the State for Notifier and Audit Tasks

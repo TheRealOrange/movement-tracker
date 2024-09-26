@@ -16,14 +16,14 @@ pub(crate) async fn health_check_handler(
     Extension(state): Extension<Arc<AppState>>,
 ) -> impl IntoResponse {
     // Check Current Health Status
-    let current_status = check_health(&state).await;
+    let current_status = state.health_status.lock().await;
 
     // Map CurrentHealthStatus to HealthCheckResponse
     let response = HealthCheckResponse {
-        database: current_status.database,
-        notifier: current_status.notifier,
-        audit: current_status.audit,
-        bot: current_status.bot
+        database: current_status.database.clone(),
+        notifier: current_status.notifier.clone(),
+        audit: current_status.audit.clone(),
+        bot: current_status.bot.clone()
     };
 
     // Determine Overall HTTP Status Code

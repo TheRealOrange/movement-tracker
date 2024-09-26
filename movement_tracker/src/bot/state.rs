@@ -18,7 +18,7 @@ use crate::bot::plan::{plan, plan_select, plan_view, plan_view_availability};
 use crate::types::{Apply, Availability, AvailabilityDetails, Ict, NotificationSettings, RoleType, Usr, UsrType};
 use crate::{controllers, log_endpoint_hit};
 use crate::bot::notify::{notify, notify_settings};
-use crate::bot::saf100::{saf100, saf100_confirm, saf100_select, saf100_view};
+use crate::bot::saf100::{saf100, saf100_confirm, saf100_select, saf100_view, Saf100ViewType};
 use crate::bot::upcoming::upcoming;
 
 #[derive(Clone, Default)]
@@ -111,20 +111,22 @@ pub(super) enum State {
     AvailabilityView {
         msg_id: MessageId,
         prefix: String,
-        availability_list: Vec<Availability>
+        month: NaiveDate
     },
     AvailabilitySelect {
         msg_id: MessageId,
         availability_list: Vec<Availability>,
         prefix: String,
-        start: usize
+        start: usize,
+        month: NaiveDate
     },
     AvailabilityModify {
         msg_id: MessageId,
         prefix: String,
         availability_entry: Availability,
         action: AvailabilityAction,
-        start: usize
+        start: usize,
+        month: NaiveDate
     },
     AvailabilityModifyType {
         msg_id: MessageId,
@@ -132,39 +134,42 @@ pub(super) enum State {
         change_msg_id: MessageId,
         availability_entry: Availability,
         action: AvailabilityAction,
-        start: usize
+        start: usize,
+        month: NaiveDate
     },
     AvailabilityModifyRemarks {
         msg_id: MessageId,
         change_msg_id: MessageId,
         availability_entry: Availability,
         action: AvailabilityAction,
-        start: usize
+        start: usize,
+        month: NaiveDate
     },
     AvailabilityDeleteConfirm {
         msg_id: MessageId,
         prefix: String,
         availability_entry: Availability,
         action: AvailabilityAction,
-        start: usize
+        start: usize,
+        month: NaiveDate
     },
     AvailabilityAdd {
         msg_id: MessageId,
         prefix: String,
-        avail_type: Ict
+        avail_type: Ict,
     },
     AvailabilityAddChangeType {
         msg_id: MessageId,
         prefix: String,
         change_type_msg_id: MessageId,
-        avail_type: Ict
+        avail_type: Ict,
     },
     AvailabilityAddRemarks {
         msg_id: MessageId,
         prefix: String,
         change_msg_id: MessageId,
         avail_type: Ict,
-        avail_dates: Vec<NaiveDate>
+        avail_dates: Vec<NaiveDate>,
     },
     // States meant for viewing the forecast
     ForecastView {
@@ -250,14 +255,14 @@ pub(super) enum State {
         availability_list: Vec<AvailabilityDetails>,
         prefix: String,
         start: usize,
-        action: String
+        action: Saf100ViewType
     },
     Saf100Confirm {
         msg_id: MessageId,
         availability: Availability,
         prefix: String,
         start: usize,
-        action: String
+        action: Saf100ViewType
     },
     // States meant for editing the notification settings
     NotifySettings {
@@ -314,7 +319,7 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::PlanSelect].endpoint(plan_select))
             .branch(case![State::UserSelect].endpoint(user_select))
         )
-        .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_remarks))
+        .branch(case![State::AvailabilityModifyRemarks { msg_id, change_msg_id, availability_entry, action, start, month }].endpoint(availability_modify_remarks))
         .branch(case![State::AvailabilityAdd { msg_id, prefix, avail_type }].endpoint(availability_add_message))
         .branch(case![State::AvailabilityAddRemarks { msg_id, prefix, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_remarks))
         //everything below is a catchall case to tell the user they should use a callback button rather than send a message
@@ -337,12 +342,12 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
         .branch(case![State::Saf100Select { msg_id, prefix }].endpoint(press_button_prompt))
         .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(press_button_prompt))
         .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityView { msg_id, prefix, month }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start, month }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start, month }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start, month }].endpoint(press_button_prompt))
         .branch(case![State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id, avail_type }].endpoint(press_button_prompt))
-        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start }].endpoint(press_button_prompt))
+        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start, month }].endpoint(press_button_prompt))
         .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(press_button_prompt));
     
 
@@ -368,14 +373,14 @@ pub(super) fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync 
             .branch(case![State::Saf100View { msg_id, availability_list, prefix, start, action }].endpoint(saf100_view))
             .branch(case![State::Saf100Confirm { msg_id, availability, prefix, start, action }].endpoint(saf100_confirm))
         )
-        .branch(case![State::AvailabilityView { msg_id, prefix, availability_list }].endpoint(availability_view))
-        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start }].endpoint(availability_select))
-        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start }].endpoint(availability_modify))
-        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start }].endpoint(availability_modify_type))
+        .branch(case![State::AvailabilityView { msg_id, prefix, month }].endpoint(availability_view))
+        .branch(case![State::AvailabilitySelect { msg_id, availability_list, prefix, start, month }].endpoint(availability_select))
+        .branch(case![State::AvailabilityModify { msg_id, prefix, availability_entry, action, start, month }].endpoint(availability_modify))
+        .branch(case![State::AvailabilityModifyType { msg_id, prefix, change_msg_id, availability_entry, action, start, month }].endpoint(availability_modify_type))
         .branch(case![State::AvailabilityAdd { msg_id, prefix, avail_type }].endpoint(availability_add_callback))
         .branch(case![State::AvailabilityAddChangeType { msg_id, prefix, change_type_msg_id, avail_type }].endpoint(availability_add_change_type))
         .branch(case![State::AvailabilityAddRemarks { msg_id, prefix, change_msg_id, avail_type, avail_dates }].endpoint(availability_add_complete))
-        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start }].endpoint(availability_delete_confirm))
+        .branch(case![State::AvailabilityDeleteConfirm { msg_id, prefix, availability_entry, action, start, month }].endpoint(availability_delete_confirm))
         .branch(case![State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }].endpoint(forecast_view));
 
     dialogue::enter::<Update, InMemStorage<State>, State, _>()
