@@ -11,7 +11,6 @@ use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::types::{Availability, AvailabilityDetails, Ict, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
-use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
@@ -483,7 +482,7 @@ async fn handle_show_availability(
     msg_id: Option<MessageId>
 ) -> HandlerResult {
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix = generate_prefix();
+    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
     // Retrieve all the pending applications
     match controllers::scheduling::get_availability_by_tele_id_and_dates(pool, tele_id, month, utils::last_day_of_month(month)).await {
@@ -514,7 +513,7 @@ async fn handle_go_back(
     msg_id: Option<MessageId>
 ) -> HandlerResult {
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix = generate_prefix();
+    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
     // Retrieve all the pending applications
     match controllers::scheduling::get_upcoming_availability_by_tele_id(pool, tele_id)
@@ -724,7 +723,7 @@ pub(super) async fn availability_view(
         Err(_) => { return Ok(()); }
     };
 
-    let prefix = generate_prefix();
+    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
     let show = utils::MAX_SHOW_ENTRIES;
     

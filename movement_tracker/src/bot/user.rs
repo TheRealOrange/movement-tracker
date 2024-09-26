@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
 use callback_data::{CallbackData, CallbackDataHandler};
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
@@ -278,7 +277,7 @@ async fn handle_ops_name_input(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, 
                 match controllers::user::get_user_by_ops_name(&pool, cleaned_ops_name.as_ref()).await {
                     Ok(user_details) => {
                         // Generate random prefix to make the IDs only applicable to this dialogue instance
-                        let prefix = generate_prefix();
+                        let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
                         let is_last_admin = match controllers::user::is_last_admin(&pool, user_details.id).await {
                             Ok(is_last_admin) => is_last_admin,

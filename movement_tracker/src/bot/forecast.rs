@@ -9,7 +9,6 @@ use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, HandlerResult, MyDialogue};
 use crate::types::{AvailabilityDetails, RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, utils};
-use crate::utils::generate_prefix;
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -240,7 +239,7 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
             let end = start.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, role_type.clone(), start, end).await {
                 Ok(availability_list) => {
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     match display_availability_forecast(&bot, dialogue.chat_id(), &user.username, &role_type, &availability_list, start, end, &prefix, None).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(msg_id) => dialogue.update(State::ForecastView { msg_id, prefix, availability_list, role_type, start, end }).await?

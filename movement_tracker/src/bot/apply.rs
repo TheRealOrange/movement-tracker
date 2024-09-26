@@ -17,7 +17,6 @@ use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
 use callback_data::CallbackData;
 use callback_data::CallbackDataHandler;
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
@@ -299,7 +298,7 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
             ).await;
 
             // Generate random prefix to make the IDs only applicable to this dialogue instance
-            let prefix: String = generate_prefix();
+            let prefix: String = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
             match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, utils::MAX_SHOW_ENTRIES, None)
                 .await {
@@ -662,7 +661,7 @@ pub(super) async fn apply_edit_name(
                         &user.username,
                     ).await;
                     log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, &prefix, Some(msg_id)).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, prefix, application, admin }).await?
@@ -718,7 +717,7 @@ pub(super) async fn apply_edit_ops_name(
                     // OPS name is unique, proceed with registration
                     application.ops_name = ops_name.clone();
                     log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, &prefix, Some(msg_id)).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, prefix, application, admin }).await?
