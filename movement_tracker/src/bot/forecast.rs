@@ -87,6 +87,12 @@ async fn display_availability_forecast(
         end.format("%b\\-%d\\-%Y")
     );
 
+    // Calculate the length of the longest `ops_name`
+    let max_len = availability_list.iter()
+        .map(|info| info.ops_name.len())
+        .max()
+        .unwrap_or(0); // Handle case when result is empty
+
     // Group availability by year and month
     let mut availability_by_year_month: std::collections::BTreeMap<(i32, u32), Vec<&AvailabilityDetails>> = std::collections::BTreeMap::new();
     for availability in availability_list {
@@ -150,13 +156,14 @@ async fn display_availability_forecast(
                 };
 
                 per_day = format!(
-                    "\\- {} __{}__{}{}{}{}\n",
+                    "\\- `{:<width$}` __{}__{}{}{}{}\n",
                     availability.ops_name,
                     availability.ict_type.as_ref(),
                     planned_str,
                     avail,
                     usrtype_str,
-                    remarks_str
+                    remarks_str,
+                    width = max_len
                 );
 
                 if availability.avail < Local::now().date_naive() {
