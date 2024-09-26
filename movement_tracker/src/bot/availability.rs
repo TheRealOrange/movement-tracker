@@ -286,7 +286,7 @@ async fn handle_re_show_options(
             // Find appropriate starting index if not provided
             let mut start = 0;
             for (ind, entry) in availability_list.iter().enumerate() {
-                if entry.avail > month {
+                if entry.avail >= month {
                     start = ind;
                     break;
                 }
