@@ -17,12 +17,17 @@ use strum::EnumProperty;
 use callback_data::CallbackData;
 use callback_data::CallbackDataHandler;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) enum Saf100ViewType {
+    SeeAvail,
+    SeePlanned
+}
+
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
 enum Saf100CallbackData {
     // Initial Selection Actions
-    SeeAvail,
-    SeePlanned,
+    See { view_type: Saf100ViewType},
     Cancel,
 
     // Pagination Actions
@@ -92,7 +97,7 @@ fn get_paginated_text(
     availability: &Vec<AvailabilityDetails>,
     start: usize,
     show: usize,
-    action: &String,
+    action: &Saf100ViewType,
 ) -> String {
     let slice_end = min(start + show, availability.len());
     let shown_entries = availability.get(start..slice_end).unwrap_or(&[]);
@@ -100,7 +105,10 @@ fn get_paginated_text(
     // Header
     let header = format!(
         "Showing {}availability \\({} to {}\\) out of {}\\.\n\n",
-        if action == "SAF100_SEE_AVAIL" { "" } else { "*planned* "},
+        match action {
+            Saf100ViewType::SeeAvail => { "" }
+            Saf100ViewType::SeePlanned => { "*planned* " }
+        },
         start + 1,
         slice_end,
         availability.len()
@@ -113,6 +121,7 @@ fn get_paginated_text(
         .unwrap_or(0); // Handle case when result is empty
 
     // Prepare the list of availability entries with SAF100 status
+    let mut count = 0;
     let mut entries_text = String::new();
     for entry in shown_entries {
         let saf100_status = if entry.saf100 { "✅ SAF100 Issued" } else { if entry.planned { "❌ SAF100 Pending" } else { " \\(NOT PLANNED\\)" }};
@@ -125,10 +134,12 @@ fn get_paginated_text(
             saf100_status, avail_status,
             width = max_len // Dynamically set the width
         ).as_str());
+        
+        if entry.is_valid && !entry.saf100 { count += 1; }
     }
 
     // Footer with instructions
-    let footer = if availability.is_empty() { "\nNo pending SAF100\\.".to_string() } else { "\nWhich entry do you want to confirm issued SAF100?".to_string() };
+    let footer = if availability.is_empty() || count == 0 { "\nNo pending SAF100 to issue\\.".to_string() } else { "\nWhich entry do you want to confirm issued SAF100?".to_string() };
 
     // Combine all parts
     format!("{}{}{}", header, entries_text, footer)
@@ -142,9 +153,10 @@ async fn update_paginated_message(
     availability_list: &Vec<AvailabilityDetails>,
     new_start: &usize,
     show: &usize,
-    action: &String,
+    action: &Saf100ViewType,
     msg_id: Option<MessageId>,
     username: &Option<String>,
+    no_button: bool
 ) -> Result<Option<MessageId>, ()> {
     // Generate the paginated keyboard
     let paginated_keyboard = match get_paginated_keyboard(availability_list, prefix, *new_start, *show) {
@@ -160,7 +172,7 @@ async fn update_paginated_message(
 
     let message_text = get_paginated_text(availability_list, *new_start, *show, action);
     // Send or edit the message
-    Ok(send_or_edit_msg(bot, chat_id, username, msg_id, message_text, Some(paginated_keyboard), Some(ParseMode::MarkdownV2)).await)
+    Ok(send_or_edit_msg(bot, chat_id, username, msg_id, message_text, if !no_button { Some(paginated_keyboard) } else { None }, Some(ParseMode::MarkdownV2)).await)
 }
 
 async fn handle_re_show_options(
@@ -169,16 +181,19 @@ async fn handle_re_show_options(
     username: &Option<String>,
     start: usize,
     show: usize,
-    action: String,
+    action: Saf100ViewType,
     msg_id: Option<MessageId>,
     pool: &PgPool
 ) -> HandlerResult {
 
     // Fetch the relevant availability entries
-    let availability_result = if action == "SAF100_SEE_AVAIL" {
-        controllers::attendance::get_future_valid_availability_for_ns(pool).await
-    } else {
-        controllers::attendance::get_future_planned_availability_for_ns(pool).await
+    let availability_result = match action {
+        Saf100ViewType::SeeAvail => {
+            controllers::attendance::get_future_valid_availability_for_ns(pool).await
+        }
+        Saf100ViewType::SeePlanned => {
+            controllers::attendance::get_future_planned_availability_for_ns(pool).await
+        }
     };
 
     match availability_result {
@@ -191,17 +206,23 @@ async fn handle_re_show_options(
             }
 
             // Generate a random prefix for callback data
-            let prefix: String = utils::generate_prefix();
+            let prefix: String = generate_prefix();
 
-            let new_start = if start >= availability_list.len() { max(0, availability_list.len() - show) } else { start };
-            match update_paginated_message(&bot, dialogue.chat_id(), &prefix, &availability_list, &new_start, &show, &action, msg_id, username)
+            let entries: Vec<bool> = availability_list.iter().filter_map(|entry| { if !entry.saf100 && entry.is_valid { Some(true) } else { None } }).collect();
+            let no_buttons = entries.len() <= 0;
+            let new_start = if start >= availability_list.len() { max(0, availability_list.len() as i64 - show as i64) as usize } else { start };
+            match update_paginated_message(&bot, dialogue.chat_id(), &prefix, &availability_list, &new_start, &show, &action, msg_id, username, no_buttons)
                 .await {
                 Ok(msg_id) => {
                     match msg_id {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => {
-                            // Update the state with the new start index
-                            dialogue.update(State::Saf100View { msg_id: new_msg_id, availability_list, prefix, start: new_start, action }).await?
+                            if no_buttons {
+                                dialogue.update(State::Start).await?
+                            } else {
+                                // Update the state with the new start index
+                                dialogue.update(State::Saf100View { msg_id: new_msg_id, availability_list, prefix, start: new_start, action }).await?
+                            }
                         }
                     }
                 }
@@ -244,8 +265,8 @@ pub(super) async fn saf100(
 
     // Define the inline keyboard buttons
     let keyboard = InlineKeyboardMarkup::new(vec![
-        vec![InlineKeyboardButton::callback("SEE AVAIL", Saf100CallbackData::SeeAvail.to_callback_data(&prefix)),
-            InlineKeyboardButton::callback("SEE PLANNED", Saf100CallbackData::SeePlanned.to_callback_data(&prefix)), ],
+        vec![InlineKeyboardButton::callback("SEE AVAIL", Saf100CallbackData::See { view_type: Saf100ViewType::SeeAvail }.to_callback_data(&prefix)),
+            InlineKeyboardButton::callback("SEE PLANNED", Saf100CallbackData::See { view_type: Saf100ViewType::SeePlanned }.to_callback_data(&prefix)), ],
         vec![InlineKeyboardButton::callback("CANCEL", Saf100CallbackData::Cancel.to_callback_data(&prefix)), ],
     ]);
 
@@ -300,14 +321,8 @@ pub(super) async fn saf100_select(
 
     // Handle based on the variant
     match callback {
-        Saf100CallbackData::SeeAvail => {
-            // Determine the action based on selection
-            let action = "SAF100_SEE_AVAIL".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, utils::MAX_SHOW_ENTRIES, action, Some(msg_id), &pool).await?;
-        }
-        Saf100CallbackData::SeePlanned => {
-            let action = "SAF100_SEE_PLANNED".to_string();
-            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, utils::MAX_SHOW_ENTRIES, action, Some(msg_id), &pool).await?;
+        Saf100CallbackData::See { view_type } => {
+            handle_re_show_options(&bot, &dialogue, &q.from.username, 0, utils::MAX_SHOW_ENTRIES, view_type, Some(msg_id), &pool).await?;
         }
         Saf100CallbackData::Cancel => {
             // Handle cancellation by reverting to the start state
@@ -334,7 +349,7 @@ pub(super) async fn saf100_view(
         Vec<AvailabilityDetails>,
         String,
         usize,
-        String,
+        Saf100ViewType,
     ),
     q: CallbackQuery,
     pool: PgPool
@@ -427,7 +442,7 @@ pub(super) async fn saf100_view(
 pub(super) async fn saf100_confirm(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, availability, prefix, start, action): (MessageId, Availability, String, usize, String),
+    (msg_id, availability, prefix, start, action): (MessageId, Availability, String, usize, Saf100ViewType),
     q: CallbackQuery,
     pool: PgPool
 ) -> HandlerResult {

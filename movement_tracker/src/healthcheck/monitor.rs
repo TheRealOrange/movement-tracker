@@ -27,20 +27,18 @@ impl CurrentHealthStatus {
 
 // Starts the health monitoring task
 pub(crate) async fn start_health_monitor(state: Arc<AppState>) {
-    // Initialize previous health status
-    let mut previous_status = CurrentHealthStatus::new();
-
     loop {
-        // Wait for a specified interval (e.g., 60 seconds)
-        tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+        // Wait for a specified interval (e.g., 120 seconds)
+        tokio::time::sleep(tokio::time::Duration::from_secs(120)).await;
 
         // Check current health status
         let current_status = check_health(&state).await;
+        let mut previous_health_status = state.health_status.lock().await;
 
         // Compare with previous status
-        if current_status != previous_status {
+        if current_status != *previous_health_status {
             // Health status has changed
-            log::info!("Health status changed: {:?} -> {:?}", previous_status, current_status);
+            log::info!("Health status changed: {:?} -> {:?}", *previous_health_status, current_status);
 
             // Send notification with Emoticons
             if let Err(e) = send_health_notification(&state.bot, &current_status, &state.db_pool).await {
@@ -48,7 +46,7 @@ pub(crate) async fn start_health_monitor(state: Arc<AppState>) {
             }
 
             // Update previous status
-            previous_status = current_status;
+            *previous_health_status = current_status;
         }
     }
 }

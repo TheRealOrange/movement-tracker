@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            availability.id,\n            availability.usr_id AS user_id,\n            availability.avail,\n            availability.planned,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE\n        AND availability.avail >= $2\n        AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability\n        ORDER BY availability.avail ASC;\n        ",
+  "query": "\n        SELECT\n            availability.id,\n            availability.usr_id AS user_id,\n            availability.avail,\n            availability.planned,\n            availability.ict_type AS \"ict_type: _\",\n            availability.remarks,\n            availability.saf100,\n            availability.attended,\n            availability.is_valid,\n            availability.created,\n            availability.updated\n        FROM availability\n        JOIN usrs ON usrs.id = availability.usr_id\n        WHERE usrs.tele_id = $1 AND usrs.is_valid = TRUE\n          AND availability.avail >= $2\n          AND availability.avail <= $3\n          AND (availability.is_valid = TRUE OR availability.planned = TRUE)  -- Only fetch valid availability\n        ORDER BY availability.avail ASC;\n        ",
   "describe": {
     "columns": [
       {
@@ -73,6 +73,7 @@
     "parameters": {
       "Left": [
         "Int8",
+        "Date",
         "Date"
       ]
     },
@@ -90,5 +91,5 @@
       false
     ]
   },
-  "hash": "acb0055c988755f8b05cecadf9304441c176927513b5cc54f5fee630da694fc1"
+  "hash": "53f6e584ffbc6aea21dbc68c40069b2060f53970be473f3b9ed6a9e4655b7ec5"
 }
