@@ -726,7 +726,6 @@ pub(super) async fn availability_view(
 
     let prefix = generate_prefix();
 
-    let start = 0;
     let show = utils::MAX_SHOW_ENTRIES;
     
     match callback {
@@ -739,7 +738,7 @@ pub(super) async fn availability_view(
         AvailabilityCallbacks::Add => {
             let avail_type = Ict::LIVE;
             match update_add_availability(&bot, dialogue.chat_id(), &avail_type, &q.from.username, &prefix, msg_id).await {
-                None => {}
+                None => dialogue.update(State::ErrorState).await?,
                 Some(new_msg_id) => {
                     dialogue.update(State::AvailabilityAdd { msg_id: new_msg_id, prefix, avail_type }).await?
                 }
