@@ -1,10 +1,14 @@
-use chrono::{Datelike, Duration, Local, NaiveDate};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
+use chrono::{Datelike, Duration, Utc, NaiveDate};
+
+use once_cell::sync::Lazy;
+use regex::Regex;
+
 use teloxide::types::User;
+use crate::APP_TIMEZONE;
+use crate::now;
 
 //Regular expressions for parsing different date formats
 static FULL_MONTH_FIRST_PATTERN: Lazy<Regex> = Lazy::new(|| {
@@ -92,7 +96,7 @@ fn date_or_string(
 
 // Parses a single date string into NaiveDate
 pub(crate) fn parse_single_date(input: &str) -> Result<NaiveDate, String> {
-    let today = Local::now().naive_local().date();
+    let today = now!().naive_local().date();
     let current_year = today.year();
 
     // 1. Try "year month day" pattern, e.g., "2024 nov 12"
@@ -347,7 +351,7 @@ static DATE_RANGE_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
 
 // Parses a date range string into a Vec<NaiveDate>
 pub fn parse_date_range(input: &str) -> Result<Vec<NaiveDate>, String> {
-    let today = Local::now().naive_local().date();
+    let today = now!().naive_local().date();
     let current_year = today.year();
 
     // Vector to collect errors from each pattern
@@ -551,7 +555,7 @@ pub(crate) fn last_day_of_month(date: NaiveDate) -> NaiveDate {
 }
 
 pub(crate) fn this_month_bound() -> (NaiveDate, NaiveDate) {
-    let today = Local::now().date_naive();
+    let today = now!().date_naive();
 
     // Get the current year and month
     let current_year = today.year();
