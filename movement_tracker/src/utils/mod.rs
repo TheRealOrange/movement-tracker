@@ -582,6 +582,8 @@ pub(crate) const MAX_SHOW_ENTRIES: usize = 6;
 pub(crate) const MAX_REMARKS_SHOWN_CHARS_BUTTON: usize = 8;
 pub(crate) const MAX_REMARKS_SHOWN_CHARS_TEXT: usize = 22;
 
+pub(crate) const CALLBACK_PREFIX_LEN: usize = 8;
+
 pub(crate) fn is_valid_name(name: &str) -> bool {
     name.chars().all(|c| c.is_ascii_alphabetic() || c.is_whitespace())
 }
@@ -611,10 +613,10 @@ pub(crate) fn username_link_tag(user: &User) -> String{
 }
 
 // Generates a random prefix for callback data
-pub(crate) fn generate_prefix() -> String {
+pub(crate) fn generate_prefix(n: usize) -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(5)
+        .take(n)
         .map(char::from)
         .collect()
 }
