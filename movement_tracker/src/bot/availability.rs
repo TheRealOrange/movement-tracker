@@ -180,7 +180,7 @@ async fn display_availability_options(bot: &Bot, chat_id: ChatId, username: &Opt
             "Here are the upcoming dates in *{}* for which you have indicated availability:\n",
             utils::escape_special_characters(&month.format("%B %Y").to_string())
         ));
-        
+
         // Format availability for each day in the month
         for availability in existing {
             let truncated_remarks = if let Some(remarks) = &availability.remarks {
@@ -280,7 +280,7 @@ async fn handle_re_show_options(
             return Ok(());
         }
     };
-    
+
     handle_show_options(bot, dialogue, username, availability_list, prefix, start, show, action, month, msg_id).await?;
     Ok(())
 }
@@ -309,7 +309,7 @@ async fn handle_show_options(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -387,7 +387,7 @@ async fn display_delete_confirmation(bot: &Bot, chat_id: ChatId, username: &Opti
         .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(prefix)));
     
     let message_text = format!(
-        "⚠️ You have already been planned on __{}__{}\\.\nConfirm rescind availability?", 
+        "⚠️ You have already been planned on __{}__{}\\.\nConfirm rescind availability?",
         entry.avail.format("%b\\-%d\\-%Y"),
         if entry.saf100 { " *\\(SAF100 ISSUED\\)*" } else { "" }
     );
@@ -418,7 +418,7 @@ async fn delete_availability_entry_and_go_back(
                         notifier::emit::availability_notifications(
                             &bot,
                             format!(
-                                "`{}`{} has specified they are *UNAVAIL* on {}",
+                                "`{}`{} has specified they are *NO LONGER AVAIL* on {}",
                                 utils::escape_special_characters(&details.ops_name),
                                 if details.usr_type == UsrType::NS {" \\(NS\\)"} else {""},
                                 utils::escape_special_characters(&details.avail.format("%Y-%m-%d").to_string()),
@@ -469,7 +469,7 @@ async fn handle_show_availability(
 ) -> HandlerResult {
     // Generate random prefix to make the IDs only applicable to this dialogue instance
     let prefix = generate_prefix();
-    
+
     // Retrieve all the pending applications
     match controllers::scheduling::get_availability_by_tele_id_and_dates(pool, tele_id, month, utils::last_day_of_month(month)).await {
         Ok(availability_list) => {
@@ -758,7 +758,7 @@ pub(super) async fn availability_view(
 pub(super) async fn availability_add_callback(
     bot: Bot,
     dialogue: MyDialogue,
-    (msg_id, prefix, avail_type): (MessageId, String, Ict), 
+    (msg_id, prefix, avail_type): (MessageId, String, Ict),
     q: CallbackQuery,
 ) -> HandlerResult {
     log_endpoint_hit!(
@@ -1033,7 +1033,7 @@ pub(super) async fn availability_add_remarks(
             log_try_remove_markup(&bot, dialogue.chat_id(), change_msg_id).await;
             register_availability(&bot, &dialogue, &user.username, user.id.0, &avail_dates, &avail_type, Some(input_remarks), &pool, None).await;
 
-            dialogue.update(State::Start).await?; 
+            dialogue.update(State::Start).await?;
         }
         None => {
             send_msg(
