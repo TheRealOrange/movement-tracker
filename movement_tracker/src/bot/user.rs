@@ -1,4 +1,5 @@
-use chrono::Local;
+use crate::APP_TIMEZONE;
+use chrono::Utc;
 
 use sqlx::PgPool;
 
@@ -8,7 +9,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use super::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UserInfo, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::{controllers, log_endpoint_hit, notifier, now, utils};
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -82,9 +83,9 @@ fn get_user_edit_text(user_details: &Usr) -> String {
         user_details.role_type.as_ref(),
         user_details.usr_type.as_ref(),
         if user_details.admin == true { "YES" } else { "NO" }, 
-        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&Local::now().format("%d%m %H%M.%S").to_string())
+        utils::escape_special_characters(&user_details.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&user_details.updated.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&now!().format("%d%m %H%M.%S").to_string())
     )
 }
 

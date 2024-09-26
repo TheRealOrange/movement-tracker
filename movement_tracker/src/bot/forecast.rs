@@ -1,4 +1,5 @@
-use chrono::{Datelike, Duration, Local, NaiveDate};
+use crate::APP_TIMEZONE;
+use chrono::{Datelike, Duration, Utc, NaiveDate};
 
 use sqlx::PgPool;
 
@@ -8,7 +9,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, HandlerResult, MyDialogue};
 use crate::types::{AvailabilityDetails, RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit, utils};
+use crate::{controllers, log_endpoint_hit, now, utils};
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -54,8 +55,8 @@ async fn display_availability_forecast(
         .collect();
 
     let mut view_range: Vec<Vec<InlineKeyboardButton>> = Vec::new();
-    let this_month_str = Local::now().format("%b").to_string().to_uppercase();
-    let next_month_str = utils::add_month_safe(Local::now().date_naive(), 1).format("%b").to_string().to_uppercase();
+    let this_month_str = now!().format("%b").to_string().to_uppercase();
+    let next_month_str = utils::add_month_safe(now!().date_naive(), 1).format("%b").to_string().to_uppercase();
     view_range.push(
         [("NEXT WEEK", ForecastCallbackData::ViewNextWeek), (&this_month_str, ForecastCallbackData::ViewThisMonth), (&next_month_str, ForecastCallbackData::ViewNextMonth)]
             .into_iter()
@@ -103,7 +104,7 @@ async fn display_availability_forecast(
             .push(availability);
     }
 
-    let today = Local::now().date_naive();
+    let today = now!().date_naive();
     // Format the availability information grouped by year and month
     for ((year, month), availabilities) in availability_by_year_month {
         let date_month = NaiveDate::from_ymd_opt(year, month, 1)?;
@@ -165,7 +166,7 @@ async fn display_availability_forecast(
                     width = max_len
                 );
 
-                if availability.avail < Local::now().date_naive() {
+                if availability.avail < now!().date_naive() {
                     output_text.push_str(&format!("~{}~", per_day));
                 } else {
                     output_text.push_str(&per_day);
@@ -179,7 +180,7 @@ async fn display_availability_forecast(
     output_text.push_str(
         format!(
             "\nUpdated: {}",
-            Local::now().format("%d%m %H%M\\.%S").to_string()
+            now!().format("%d%m %H%M\\.%S").to_string()
         ).as_ref(),
     );
 
@@ -235,7 +236,7 @@ pub(super) async fn forecast(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
         Ok(retrieved_user) => {
             // transition to showing the availability for the next week first, with options to view subsequent weeks, months, or whole month
             let role_type = retrieved_user.role_type;
-            let start = Local::now().date_naive(); // Get today's date in the local timezone
+            let start = now!().date_naive(); // Get today's date in the local timezone
             let end = start.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
             match controllers::scheduling::get_availability_for_role_and_dates(&pool, role_type.clone(), start, end).await {
                 Ok(availability_list) => {
@@ -307,7 +308,7 @@ pub(super) async fn forecast_view(
             return Ok(());
         }
         ForecastCallbackData::ViewNextWeek => {
-            new_start = Local::now().date_naive();
+            new_start = now!().date_naive();
             new_end = end.checked_add_signed(Duration::weeks(1)).expect("Overflow when adding duration");
         }
         ForecastCallbackData::ViewThisMonth => {

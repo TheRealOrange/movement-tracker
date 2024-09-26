@@ -2,7 +2,6 @@ use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json };
 use serde::Serialize;
 use std::sync::Arc;
 use crate::AppState;
-use crate::healthcheck::monitor::check_health;
 
 #[derive(Serialize)]
 struct HealthCheckResponse {
