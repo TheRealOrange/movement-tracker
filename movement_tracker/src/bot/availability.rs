@@ -264,7 +264,7 @@ async fn handle_re_show_options(
     username: &Option<String>,
     tele_id: u64,
     prefix: String,
-    start: usize,
+    maybe_start: Option<usize>,
     show: usize,
     action: AvailabilityAction,
     month: NaiveDate,
@@ -280,8 +280,23 @@ async fn handle_re_show_options(
             return Ok(());
         }
     };
+    
+    let actual_start = match maybe_start {
+        None => {
+            // Find appropriate starting index if not provided
+            let mut start = 0;
+            for (ind, entry) in availability_list.iter().enumerate() {
+                if entry.avail > month {
+                    start = ind;
+                    break;
+                }
+            }
+            start
+        }
+        Some(start) => start
+    };
 
-    handle_show_options(bot, dialogue, username, availability_list, prefix, start, show, action, month, msg_id).await?;
+    handle_show_options(bot, dialogue, username, availability_list, prefix, actual_start, show, action, month, msg_id).await?;
     Ok(())
 }
 
@@ -509,7 +524,7 @@ async fn handle_go_back(
                 handle_show_availability(bot, dialogue, username, tele_id, month, pool, msg_id).await?;
             } else {
                 let new_start = if start >= availability_list.len() { max(0, availability_list.len() - show) } else { start };
-                handle_re_show_options(bot, dialogue, username, tele_id, prefix, new_start, show, action, month, pool, msg_id).await?;
+                handle_re_show_options(bot, dialogue, username, tele_id, prefix, Some(new_start), show, action, month, pool, msg_id).await?;
             }
         }
         Err(_) => handle_error(&bot, &dialogue, dialogue.chat_id(), username).await
@@ -732,9 +747,9 @@ pub(super) async fn availability_view(
         }
         AvailabilityCallbacks::Modify => {
             // Determine the action based on the enum
-            handle_re_show_options(&bot, &dialogue, &q.from.username, q.from.id.0, prefix, start, show, AvailabilityAction::Modify, month, &pool, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, q.from.id.0, prefix, None, show, AvailabilityAction::Modify, month, &pool, Some(msg_id)).await?;
         } AvailabilityCallbacks::Delete => {
-            handle_re_show_options(&bot, &dialogue, &q.from.username, q.from.id.0, prefix, start, show, AvailabilityAction::Delete, month, &pool, Some(msg_id)).await?;
+            handle_re_show_options(&bot, &dialogue, &q.from.username, q.from.id.0, prefix, None, show, AvailabilityAction::Delete, month, &pool, Some(msg_id)).await?;
         }
         AvailabilityCallbacks::Done => {
             log_try_remove_markup(&bot, dialogue.chat_id(), msg_id).await;
