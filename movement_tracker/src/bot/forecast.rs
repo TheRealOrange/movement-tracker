@@ -64,7 +64,7 @@ async fn display_availability_forecast(
             .collect(),
     );
     view_range.push(
-        [("DONE", ForecastCallbackData::Done), ("NEXT MONTH", ForecastCallbackData::IncNextMonth)]
+        [("DONE", ForecastCallbackData::Done), ("+1 MONTH", ForecastCallbackData::IncNextMonth)]
             .into_iter()
             .map(|(text, data)| InlineKeyboardButton::callback(text, data.to_callback_data(&prefix)))
             .collect(),
@@ -156,12 +156,12 @@ async fn display_availability_forecast(
                 };
 
                 per_day = format!(
-                    "\\- `{:<width$}` __{}__{}{}{}{}\n",
+                    "\\- `{:<width$}` {} __{}__{}{}{}\n",
                     availability.ops_name,
+                    usrtype_str,
                     availability.ict_type.as_ref(),
                     planned_str,
                     avail,
-                    usrtype_str,
                     remarks_str,
                     width = max_len
                 );
