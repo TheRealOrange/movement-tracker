@@ -1,4 +1,5 @@
-use chrono::Local;
+use crate::APP_TIMEZONE;
+use chrono::Utc;
 
 use sqlx::PgPool;
 
@@ -8,13 +9,12 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use super::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{RoleType, UserInfo, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::{controllers, log_endpoint_hit, notifier, now, utils};
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
 use callback_data::{CallbackData, CallbackDataHandler};
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
@@ -83,9 +83,9 @@ fn get_user_edit_text(user_details: &Usr) -> String {
         user_details.role_type.as_ref(),
         user_details.usr_type.as_ref(),
         if user_details.admin == true { "YES" } else { "NO" }, 
-        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&user_details.updated.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&Local::now().format("%d%m %H%M.%S").to_string())
+        utils::escape_special_characters(&user_details.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&user_details.updated.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+        utils::escape_special_characters(&now!().format("%d%m %H%M.%S").to_string())
     )
 }
 
@@ -278,7 +278,7 @@ async fn handle_ops_name_input(bot: &Bot, dialogue: &MyDialogue, pool: &PgPool, 
                 match controllers::user::get_user_by_ops_name(&pool, cleaned_ops_name.as_ref()).await {
                     Ok(user_details) => {
                         // Generate random prefix to make the IDs only applicable to this dialogue instance
-                        let prefix = generate_prefix();
+                        let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
                         let is_last_admin = match controllers::user::is_last_admin(&pool, user_details.id).await {
                             Ok(is_last_admin) => is_last_admin,

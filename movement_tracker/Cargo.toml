@@ -6,24 +6,30 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-#axum and tower for health check endpoint, as well as teloxide webhooks
+# axum and tower for health check endpoint, as well as teloxide webhooks
 axum = "0.7.6"
 tower = "0.5.1"
 tower-http = { version = "0.6.1", features = ["trace"] }
-#teloxide dependencies for interaction with the telegram bot api
+# teloxide dependencies for interaction with the telegram bot api
 teloxide = { version = "0.13", features = ["macros", "webhooks-axum"] }
 log = "0.4"
 pretty_env_logger = "0.5.0"
-#sqlx library for connection to postgres database
+# sqlx library for connection to postgres database
 sqlx = { version = "0.8.2", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "macros"]}
-#tokio runtime for async code
+# tokio runtime for async code
 tokio = { version =  "1.40", features = ["rt-multi-thread", "macros"] }
 serde = { version = "1.0.210", features = ["derive"] }
+# for env file processing
 dotenvy = "0.15.7"
+# for enum strings
 strum = { version = "0.26", features = ["derive"] }
 strum_macros = "0.26"
 rand = "0.8"
-chrono = "0.4.38"
+# chrono for timezones and datetimes, locale to get system timezone
+chrono = "0.4"
+chrono-tz = "0.10"
+sys-locale = "=0.3.1"
+# for date matching
 regex = "1.10.5"
 once_cell = "1.19.0"
 # Procedural macro dependency

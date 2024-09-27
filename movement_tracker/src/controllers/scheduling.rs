@@ -1,9 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use crate::types::{Availability, AvailabilityDetails, Ict, RoleType};
-use chrono::Local;
+use chrono::Utc;
+
 use sqlx::types::chrono::NaiveDate;
 use sqlx::types::Uuid;
 use sqlx::PgPool;
+
+use crate::types::{Availability, AvailabilityDetails, Ict, RoleType};
+use crate::APP_TIMEZONE;
+use crate::now;
 
 pub(crate) async fn check_user_avail_multiple(
     conn: &PgPool,
@@ -287,7 +291,7 @@ pub(crate) async fn get_upcoming_availability_by_tele_id(
     conn: &PgPool,
     tele_id: u64,
 ) -> Result<Vec<Availability>, sqlx::Error> {
-    let today = Local::now().date_naive();  // Get today's date
+    let today = now!().date_naive();  // Get today's date
 
     let result = sqlx::query_as!(
         Availability,
@@ -341,7 +345,7 @@ pub(crate) async fn get_upcoming_availability_details_by_tele_id(
     conn: &PgPool,
     tele_id: u64,
 ) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
-    let today = Local::now().date_naive(); // Get today's date
+    let today = now!().date_naive(); // Get today's date
 
     let result = sqlx::query_as!(
         AvailabilityDetails,
