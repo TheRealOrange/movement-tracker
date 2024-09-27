@@ -1,5 +1,5 @@
 use std::cmp::{max, min};
-use chrono::Local;
+use chrono::Utc;
 
 use sqlx::types::Uuid;
 use sqlx::PgPool;
@@ -10,14 +10,13 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use crate::bot::state::State;
 use crate::bot::{handle_error, log_try_delete_msg, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, validate_name, validate_ops_name, HandlerResult, MyDialogue};
 use crate::types::{Apply, RoleType, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
+use crate::{controllers, log_endpoint_hit, notifier, now, utils, APP_TIMEZONE};
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumProperty;
 use callback_data::CallbackData;
 use callback_data::CallbackDataHandler;
-use crate::utils::generate_prefix;
 
 // Represents callback actions with optional associated data.
 #[derive(Debug, Clone, Serialize, Deserialize, EnumProperty, CallbackData)]
@@ -100,7 +99,7 @@ fn get_applications_text(
     slice_end: usize,
     total: usize
 ) -> String {
-    format!("Showing applications {} to {} of {}\nUpdated: {}", start + 1, slice_end, total, Local::now().format("%d%m %H%M.%S").to_string())
+    format!("Showing applications {} to {} of {}\nUpdated: {}", start + 1, slice_end, total, now!().format("%d%m %H%M.%S").to_string())
 }
 
 // Displays applications with pagination using message editing
@@ -178,9 +177,9 @@ fn get_application_edit_text(application: &Apply, admin: bool) -> String {
             application.role_type.as_ref(),
             application.usr_type.as_ref(),
             if admin == true { "YES" } else { "NO" },
-            utils::escape_special_characters(&application.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+            utils::escape_special_characters(&application.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
             format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64),
-            utils::escape_special_characters(&Local::now().format("%d%m %H%M.%S").to_string())
+            utils::escape_special_characters(&now!().format("%d%m %H%M.%S").to_string())
     )
 }
 
@@ -299,7 +298,7 @@ pub(super) async fn approve(bot: Bot, dialogue: MyDialogue, msg: Message, pool: 
             ).await;
 
             // Generate random prefix to make the IDs only applicable to this dialogue instance
-            let prefix: String = generate_prefix();
+            let prefix: String = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
             match display_applications(&bot, dialogue.chat_id(), &user.username, &applications, &prefix, 0, utils::MAX_SHOW_ENTRIES, None)
                 .await {
@@ -508,7 +507,7 @@ pub(super) async fn apply_edit_prompt(
                                 user.role_type.as_ref(),
                                 user.usr_type.as_ref(),
                                 if admin == true { "YES" } else { "NO" },
-                                utils::escape_special_characters(&user.created.with_timezone(&Local).format("%b-%d-%Y %H:%M:%S").to_string()),
+                                utils::escape_special_characters(&user.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
                                 format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64)
                             );
                             // Send or edit message
@@ -662,7 +661,7 @@ pub(super) async fn apply_edit_name(
                         &user.username,
                     ).await;
                     log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, &prefix, Some(msg_id)).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, prefix, application, admin }).await?
@@ -718,7 +717,7 @@ pub(super) async fn apply_edit_ops_name(
                     // OPS name is unique, proceed with registration
                     application.ops_name = ops_name.clone();
                     log_try_delete_msg(&bot, dialogue.chat_id(), change_msg_id).await;
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     match display_application_edit_prompt(&bot, dialogue.chat_id(), &user.username, &application, admin, &prefix, Some(msg_id)).await {
                         None => dialogue.update(State::ErrorState).await?,
                         Some(new_msg_id) => dialogue.update(State::ApplyEditPrompt { msg_id: new_msg_id, prefix, application, admin }).await?

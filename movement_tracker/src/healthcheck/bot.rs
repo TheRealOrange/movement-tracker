@@ -1,11 +1,16 @@
 use std::env;
 use std::sync::Arc;
 use std::fmt::Debug;
-use chrono::Local;
+use chrono::Utc;
+
 use futures::future::BoxFuture;
+
 use teloxide::prelude::*;
 use teloxide::error_handlers::ErrorHandler;
-use crate::AppState;
+use teloxide::types::ParseMode;
+
+use crate::{now, AppState};
+use crate::APP_TIMEZONE;
 
 // Custom Error Handler Struct
 pub(crate) struct HealthCheckErrorHandler {
@@ -57,10 +62,10 @@ pub(super) async fn check_bot_health(bot: &Bot, app_state: &AppState) -> Option<
     };
 
     // Generate a time message
-    let timecode =format!("Health Check-{}", Local::now().format("%Y%m%d%H%M%S").to_string());
+    let timecode =format!("Health Check\\-`{}`", now!().format("%Y%m%d%H%M%S").to_string());
 
     // Try sending a message with the timecode and retrieving its details
-    match bot.send_message(ChatId(chat_id), &timecode).await {
+    match bot.send_message(ChatId(chat_id), &timecode).parse_mode(ParseMode::MarkdownV2).await {
         Ok(sent_msg) => {
             // Log the success and assume the bot is healthy
             log::debug!(

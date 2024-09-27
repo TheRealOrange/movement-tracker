@@ -9,19 +9,22 @@ use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
+use sys_locale::get_locale;
 
 use axum::{Extension, Router};
 use axum::routing::get;
 use tower_http::{trace::TraceLayer};
 use tower::ServiceBuilder;
 
+use chrono_tz::{Tz, TZ_VARIANTS};
+use once_cell::sync::Lazy;
 use sqlx::PgPool;
 
 use teloxide::prelude::*;
+use tokio::sync::Mutex;
+
 use crate::controllers::db;
 use crate::types::{RoleType, UsrType};
-
-use tokio::sync::Mutex;
 use crate::healthcheck::monitor::CurrentHealthStatus;
 
 #[derive(Clone)]
@@ -33,6 +36,14 @@ struct AppState {
     bot: Bot,
     bot_health_check_active: bool,
     health_status: Arc<Mutex<CurrentHealthStatus>>
+}
+
+pub(crate) static APP_TIMEZONE: Lazy<Tz> = Lazy::new(get_timezone);
+#[macro_export]
+macro_rules! now {
+    () => {{
+        Utc::now().with_timezone(&*APP_TIMEZONE)
+    }};
 }
 
 #[tokio::main]
@@ -190,6 +201,32 @@ async fn main() {
     };
 }
 
+fn get_timezone() -> Tz {
+    // Check for the TIMEZONE environment variable
+    if let Ok(tz_name) = env::var("TIMEZONE") {
+        // If TIMEZONE is set, try to parse it into a valid Tz
+        if let Ok(tz) = tz_name.parse::<Tz>() {
+            log::info!("Using specified timezone: {}", tz_name);
+            return tz;
+        } else {
+            log::error!("Invalid TIMEZONE provided: {} Trying to use system local timezone.", tz_name);
+        }
+    }
+
+    // If TIMEZONE is not set or invalid, try to get the system's local timezone
+    if let Some(locale) = get_locale() {
+        for &tz in &TZ_VARIANTS {
+            if locale.contains(tz.name()) {
+                log::warn!("Using system local timezone: {}", tz);
+                return tz;
+            }
+        }
+    }
+    
+    log::warn!("Falling back to UTC timezone");
+    // Fallback to UTC if everything else fails
+    chrono_tz::UTC
+}
 
 pub(crate) async fn add_default_user_from_env(conn: &PgPool) -> Result<(), sqlx::Error> {
     // Check if DEFAULT_TELEGRAM_ID is set

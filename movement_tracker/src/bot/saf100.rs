@@ -10,7 +10,6 @@ use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retri
 use crate::bot::state::State;
 use crate::{controllers, log_endpoint_hit, notifier, utils};
 use crate::types::{Availability, AvailabilityDetails, Usr};
-use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
@@ -206,7 +205,7 @@ async fn handle_re_show_options(
             }
 
             // Generate a random prefix for callback data
-            let prefix: String = generate_prefix();
+            let prefix: String = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
             let entries: Vec<bool> = availability_list.iter().filter_map(|entry| { if !entry.saf100 && entry.is_valid { Some(true) } else { None } }).collect();
             let no_buttons = entries.len() <= 0;
@@ -261,7 +260,7 @@ pub(super) async fn saf100(
     };
 
     // Generate a random prefix for callback data
-    let prefix: String = utils::generate_prefix();
+    let prefix: String = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
     // Define the inline keyboard buttons
     let keyboard = InlineKeyboardMarkup::new(vec![
@@ -410,7 +409,7 @@ pub(super) async fn saf100_view(
                         availability_entry.remarks.as_deref().unwrap_or("None")
                     );
 
-                    let new_prefix = generate_prefix();
+                    let new_prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
                     // Send or edit message
                     match send_or_edit_msg(&bot, dialogue.chat_id(), &q.from.username, Some(msg_id), details_text, Some(get_confirmation_keyboard(&new_prefix)), None).await {

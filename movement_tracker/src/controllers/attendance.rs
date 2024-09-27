@@ -1,8 +1,11 @@
-use chrono::Local;
-use crate::types::{AvailabilityDetails, UsrType};
+use chrono::Utc;
+
 use sqlx::types::chrono::NaiveDate;
 use sqlx::PgPool;
 use sqlx::types::Uuid;
+
+use crate::types::{AvailabilityDetails, UsrType};
+use crate::{now, APP_TIMEZONE};
 
 async fn set_attendance(
     conn: &PgPool,
@@ -74,7 +77,7 @@ async fn set_attendance(
 pub(crate) async fn get_future_planned_availability_for_ns(
     conn: &PgPool,
 ) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
-    let today = Local::now().date_naive(); // Get today's date
+    let today = now!().date_naive(); // Get today's date
 
     let result = sqlx::query_as!(
         AvailabilityDetails,
@@ -126,7 +129,7 @@ pub(crate) async fn get_future_planned_availability_for_ns(
 pub(crate) async fn get_future_valid_availability_for_ns(
     conn: &PgPool,
 ) -> Result<Vec<AvailabilityDetails>, sqlx::Error> {
-    let today = Local::now().date_naive(); // Get today's date
+    let today = now!().date_naive(); // Get today's date
 
     let result = sqlx::query_as!(
         AvailabilityDetails,

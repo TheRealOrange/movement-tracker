@@ -1,6 +1,8 @@
+use crate::APP_TIMEZONE;
 use std::cmp::{max, min};
 use std::collections::HashSet;
 use chrono::NaiveDate;
+use chrono::Utc;
 
 use sqlx::PgPool;
 use sqlx::types::Uuid;
@@ -11,8 +13,7 @@ use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, MessageId, Par
 use super::{handle_error, log_try_remove_markup, match_callback_data, retrieve_callback_data, send_msg, send_or_edit_msg, HandlerResult, MyDialogue};
 use crate::bot::state::State;
 use crate::types::{AvailabilityDetails, RoleType, Usr, UsrType};
-use crate::{controllers, log_endpoint_hit, notifier, utils};
-use crate::utils::generate_prefix;
+use crate::{controllers, log_endpoint_hit, notifier, now, utils};
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
@@ -664,7 +665,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
         },
     };
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix = generate_prefix();
+    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
     // Try to interpret the argument as an OPS NAME first
     let cleaned_ops_name = ops_name_or_date.trim().to_uppercase();
     match controllers::user::user_exists_ops_name(&pool, cleaned_ops_name.as_ref()).await{
@@ -696,7 +697,7 @@ async fn handle_ops_name_or_date_input(bot: &Bot, dialogue: &MyDialogue, pool: &
                 match utils::parse_single_date(ops_name_or_date.as_ref()) {
                     Ok(selected_date) => {
                         // show the available users on that day
-                        let today = chrono::Local::now().naive_local().date();
+                        let today = now!().naive_local().date();
                         if selected_date < today {
                             send_msg(
                                 bot.send_message(

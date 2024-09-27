@@ -7,7 +7,6 @@ use super::{handle_error, log_try_delete_msg, match_callback_data, retrieve_call
 use crate::bot::state::State;
 use crate::types::{RoleType, UsrType};
 use crate::{controllers, log_endpoint_hit, notifier, utils};
-use crate::utils::generate_prefix;
 
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
@@ -117,7 +116,7 @@ pub(super) async fn register(bot: Bot, dialogue: MyDialogue, msg: Message, pool:
         }
         (Ok(false), Ok(false)) => {
             // User is neither registered nor has a pending application, proceed with registration
-            let prefix = generate_prefix();
+            let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
             match display_role_types(&bot, dialogue.chat_id(), &user.username, &prefix).await {
                 None => dialogue.update(State::ErrorState).await?,
                 Some(msg_id) => {
@@ -349,7 +348,7 @@ pub(super) async fn register_ops_name(
             match validate_ops_name(&bot, &dialogue, &user.username, input_ops_name_raw, &pool).await {
                 Ok(ops_name) => {
                     // OPS name is unique, proceed with registration
-                    let prefix = generate_prefix();
+                    let prefix = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
                     log_try_delete_msg(&bot, dialogue.chat_id(), msg_id).await;
                     match display_register_confirmation(&bot, dialogue.chat_id(), &user.username, &name, &ops_name, &role_type, &user_type, &prefix).await {
                         None => dialogue.update(State::ErrorState).await?,

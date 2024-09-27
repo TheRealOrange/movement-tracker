@@ -10,7 +10,6 @@ use crate::bot::{handle_error, log_try_remove_markup, match_callback_data, retri
 use crate::{controllers, log_endpoint_hit, utils};
 use crate::bot::state::State;
 use crate::types::NotificationSettings;
-use crate::utils::generate_prefix;
 
 use serde::{Serialize, Deserialize};
 use strum::EnumProperty;
@@ -164,7 +163,7 @@ pub(super) async fn notify(
     };
 
     // Generate random prefix to make the IDs only applicable to this dialogue instance
-    let prefix: String = generate_prefix();
+    let prefix: String = utils::generate_prefix(utils::CALLBACK_PREFIX_LEN);
 
     // Send DM to the user with current settings
     let msg_id = match display_dm_config_notification(&bot, ChatId(user.id.0 as i64), &user.username, &settings, &prefix).await {
