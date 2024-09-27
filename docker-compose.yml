@@ -48,6 +48,7 @@ services:
       DEFAULT_OPS_NAME: ${DEFAULT_OPS_NAME}
       DEFAULT_USER_NAME: ${DEFAULT_USER_NAME}
       BOT_HEALTH_CHECK_CHAT_ID: ${BOT_HEALTH_CHECK_CHAT_ID}
+      TIMEZONE: "Asia/Singapore"
     depends_on:
       db:
         condition: service_healthy
