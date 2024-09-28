@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE scheduled_notifications\n            SET is_valid = FALSE\n            WHERE id = $1;\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a604f11b15431c7b726c527100afc1b7da935ade107b662dbca2ebe50ccc2471"
+}
