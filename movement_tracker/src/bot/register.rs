@@ -441,9 +441,9 @@ pub(super) async fn register_complete(
                     ).await;
 
                     let registration_text_str = format!(
-                        "Submitted registration with the following details:\nROLE: `{}`\nTYPE: `{}`\nNAME: *{}*\nOPS NAME: `{}`\n\nPlease wait for approval.",
-                        role_type.as_ref(),
-                        user_type.as_ref(),
+                        "Submitted registration with the following details:\nROLE: `{}`\nTYPE: `{}`\nNAME: *{}*\nOPS NAME: `{}`\n\nPlease wait for approval\\.",
+                        utils::escape_special_characters(role_type.as_ref()),
+                        utils::escape_special_characters(user_type.as_ref()),
                         utils::escape_special_characters(&name), utils::escape_special_characters(&ops_name)
                     );
 

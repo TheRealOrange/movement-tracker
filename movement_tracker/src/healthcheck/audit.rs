@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
-use sqlx::PgPool;
+use sqlx::{Error, PgPool};
+use sqlx::postgres::PgQueryResult;
 use crate::AppState;
 
 pub(crate) async fn start_audit_task(state: Arc<AppState>) -> Result<(), sqlx::Error> {
@@ -37,32 +38,40 @@ async fn audit_data(conn: &PgPool) -> Result<(), sqlx::Error> {
         FROM
             scheduled_notifications sn
         LEFT JOIN
-            availability a ON sn.avail_id = a.id AND a.is_valid = TRUE
+            availability a ON sn.avail_id = a.id
         LEFT JOIN
-            usrs u ON a.usr_id = u.id AND u.is_valid = TRUE
+            usrs u ON a.usr_id = u.id
         WHERE
             sn.is_valid = TRUE
-            AND a.id IS NULL
-            OR u.id IS NULL;
+            AND (a.is_valid = FALSE OR u.is_valid = FALSE);
         "#
     )
         .fetch_all(conn)
         .await?;
 
     for record in problematic_notifications {
-        // Decide on action: log, mark as invalid, notify admins, etc.
-        log::warn!("Notification ID {} has invalid or missing availability/user.", record.id);
-        // Example: Mark as invalid
-        sqlx::query!(
+        // log, mark as invalid
+        log::warn!("Notification ID {} has invalid or missing availability/user, invalidating.", record.id);
+        // Mark as invalid
+        let result = sqlx::query!(
             r#"
             UPDATE scheduled_notifications
-            SET is_valid = FALSE, updated = NOW()
+            SET is_valid = FALSE
             WHERE id = $1;
             "#,
             record.id
         )
             .execute(conn)
-            .await?;
+            .await;
+        
+        match result {
+            Ok(_) => {
+                log::debug!("Notification ID {} invalidated", record.id);
+            }
+            Err(e) => {
+                log::error!("Failed to mark notification ID {} as invalid: {:?}", record.id, e);
+            }
+        }
     }
 
     Ok(())

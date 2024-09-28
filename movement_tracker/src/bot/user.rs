@@ -79,13 +79,13 @@ fn get_inline_keyboard(is_last_admin: bool, prefix: &String) -> InlineKeyboardMa
 fn get_user_edit_text(user_details: &Usr) -> String {
     format!("Details of user:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUPDATED: _{}_\n\nEdited: _{}_\nDo you wish to edit any entries?",
         format!("[{}](tg://user?id={})", utils::escape_special_characters(&user_details.name), user_details.tele_id as u64),
-        &user_details.ops_name,
-        user_details.role_type.as_ref(),
-        user_details.usr_type.as_ref(),
-        if user_details.admin == true { "YES" } else { "NO" }, 
-        utils::escape_special_characters(&user_details.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&user_details.updated.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
-        utils::escape_special_characters(&now!().format("%d%m %H%M.%S").to_string())
+            utils::escape_special_characters(&user_details.ops_name),
+            utils::escape_special_characters(user_details.role_type.as_ref()),
+            utils::escape_special_characters(user_details.usr_type.as_ref()),
+            if user_details.admin == true { "YES" } else { "NO" }, 
+            utils::escape_special_characters(&user_details.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+            utils::escape_special_characters(&user_details.updated.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
+            utils::escape_special_characters(&now!().format("%d%m %H%M.%S").to_string())
     )
 }
 

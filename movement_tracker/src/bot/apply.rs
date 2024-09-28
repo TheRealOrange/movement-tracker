@@ -172,10 +172,10 @@ async fn handle_re_show_options(
 
 fn get_application_edit_text(application: &Apply, admin: bool) -> String {
     format!("Details of application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nSUBMITTED: _{}_\nUSERNAME: {}\n\nUpdated: _{}_\nDo you wish to edit any entries?",
-            application.name,
-            application.ops_name,
-            application.role_type.as_ref(),
-            application.usr_type.as_ref(),
+            utils::escape_special_characters(&application.name),
+            utils::escape_special_characters(&application.ops_name),
+            utils::escape_special_characters(application.role_type.as_ref()),
+            utils::escape_special_characters(application.usr_type.as_ref()),
             if admin == true { "YES" } else { "NO" },
             utils::escape_special_characters(&application.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
             format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64),
@@ -437,9 +437,7 @@ pub(super) async fn apply_edit_prompt(
                         application.role_type,
                         application.usr_type,
                         admin,
-                    )
-                        .await
-                    {
+                    ).await {
                         Ok(user) => {
                             // Emit system notification to indicate who has approved the user
 
@@ -504,8 +502,8 @@ pub(super) async fn apply_edit_prompt(
                             let message_text = format!(
                                 "Approved application:\nNAME: *{}*\nOPS NAME: `{}`\nROLE: `{}`\nTYPE: `{}`\nIS ADMIN: *{}*\nADDED: _{}_\nUSERNAME: {}", utils::escape_special_characters(&user.name),
                                 utils::escape_special_characters(&user.ops_name),
-                                user.role_type.as_ref(),
-                                user.usr_type.as_ref(),
+                                utils::escape_special_characters(user.role_type.as_ref()),
+                                utils::escape_special_characters(user.usr_type.as_ref()),
                                 if admin == true { "YES" } else { "NO" },
                                 utils::escape_special_characters(&user.created.with_timezone(&*APP_TIMEZONE).format("%b-%d-%Y %H:%M:%S").to_string()),
                                 format!("[{}](tg://user?id={})", utils::escape_special_characters(&application.chat_username), application.tele_id as u64)
