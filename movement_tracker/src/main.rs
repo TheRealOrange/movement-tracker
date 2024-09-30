@@ -5,6 +5,7 @@ mod utils;
 mod notifier;
 mod healthcheck;
 
+use std::collections::LinkedList;
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -21,6 +22,7 @@ use once_cell::sync::Lazy;
 use sqlx::PgPool;
 
 use teloxide::prelude::*;
+use teloxide::types::MessageId;
 use tokio::sync::Mutex;
 
 use crate::controllers::db;
@@ -35,6 +37,7 @@ struct AppState {
     bot_health: Arc<Mutex<bool>>,
     bot: Bot,
     bot_health_check_active: bool,
+    bot_health_check_msgs: Arc<Mutex<LinkedList<MessageId>>>,
     health_status: Arc<Mutex<CurrentHealthStatus>>
 }
 
@@ -112,6 +115,7 @@ async fn main() {
         bot_health: Arc::new(Mutex::new(true)),
         bot: bot.clone(),
         bot_health_check_active, // Set bot health check active flag
+        bot_health_check_msgs: Arc::new(Mutex::new(LinkedList::new())), // queue to track sent messages
         health_status: Arc::new(Mutex::new(CurrentHealthStatus::new()))
     });
 

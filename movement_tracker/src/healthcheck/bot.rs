@@ -74,6 +74,27 @@ pub(super) async fn check_bot_health(bot: &Bot, app_state: &AppState) -> Option<
                 sent_msg.id,
                 timecode
             );
+            
+            let mut sent_msgs_queue = app_state.bot_health_check_msgs.lock().await;
+
+            sent_msgs_queue.push_back(sent_msg.id);
+            if sent_msgs_queue.len() >= 10 {
+                return match sent_msgs_queue.pop_front() {
+                    None => {
+                        log::error!("Error retrieving old messages!");
+                        Some(false)
+                    }
+                    Some(old_msg) => {
+                        match bot.delete_message(ChatId(chat_id), old_msg).await {
+                            Ok(_) => Some(true),
+                            Err(e) => {
+                                log::error!("Failed to delete old bot health check message: {}", e);
+                                Some(false)
+                            }
+                        }
+                    }
+                }
+            }
             Some(true) // Bot is healthy if message sent successfully
         }
         Err(e) => {

@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::Duration;
-use sqlx::{Error, PgPool};
-use sqlx::postgres::PgQueryResult;
+use sqlx::PgPool;
 use crate::AppState;
 
 pub(crate) async fn start_audit_task(state: Arc<AppState>) -> Result<(), sqlx::Error> {
