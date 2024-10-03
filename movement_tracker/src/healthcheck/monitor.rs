@@ -7,16 +7,16 @@ use crate::healthcheck::bot::check_bot_health;
 
 // Struct to represent the current health status
 #[derive(Serialize, Clone, PartialEq, Debug)]
-pub struct CurrentHealthStatus {
+pub struct BotHealthStatus {
     pub database: String,
     pub notifier: String,
     pub audit: String,
     pub bot: String
 }
 
-impl CurrentHealthStatus {
+impl BotHealthStatus {
     pub fn new() -> Self {
-        CurrentHealthStatus {
+        BotHealthStatus {
             database: "ok".to_string(),
             notifier: "ok".to_string(),
             audit: "ok".to_string(),
@@ -41,7 +41,7 @@ pub(crate) async fn start_health_monitor(state: Arc<AppState>) {
             log::info!("Health status changed: {:?} -> {:?}", *previous_health_status, current_status);
 
             // Send notification with Emoticons
-            if let Err(e) = send_health_notification(&state.bot, &current_status, &state.db_pool).await {
+            if let Err(e) = send_health_notification(&state.bot, &*previous_health_status, &current_status, &state.db_pool).await {
                 log::error!("Failed to send health notification: {}", e);
             }
 
@@ -52,8 +52,8 @@ pub(crate) async fn start_health_monitor(state: Arc<AppState>) {
 }
 
 // Checks the current health status
-pub async fn check_health(state: &Arc<AppState>) -> CurrentHealthStatus {
-    let mut status = CurrentHealthStatus::new();
+pub async fn check_health(state: &Arc<AppState>) -> BotHealthStatus {
+    let mut status = BotHealthStatus::new();
 
     // Database Health Check
     match state.db_pool.acquire().await {
@@ -101,51 +101,48 @@ pub async fn check_health(state: &Arc<AppState>) -> CurrentHealthStatus {
 }
 
 
-// Sends a health notification via Telegram with Emoticons
+// Sends a health notification via Telegram with Emoticons and change indications
 async fn send_health_notification(
     bot: &Bot,
-    status: &CurrentHealthStatus,
-    pool: &PgPool
+    previous_status: &BotHealthStatus,
+    current_status: &BotHealthStatus,
+    pool: &PgPool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Determine Emoticons Based on Status
-    let db_emoji = match status.database.as_str() {
-        "ok" => "✅",
-        "error" => "❌",
-        _ => "❓",
-    };
-
-    let notifier_emoji = match status.notifier.as_str() {
-        "ok" => "✅",
-        "error" => "❌",
-        _ => "❓",
-    };
-
-    let audit_emoji = match status.audit.as_str() {
-        "ok" => "✅",
-        "error" => "❌",
-        _ => "❓",
-    };
-
-    let bot_emoji = match status.bot.as_str() {
-        "ok" => "✅",
-        "error" => "❌",
-        _ => "❓",
-    };
-
     // Construct the Message 
     let message = format!(
         "*Health Check Update*\n\n\
-         *Database:* {} {}\n\
-         *Notifier:* {} {}\n\
-         *Audit:* {} {}\n\
-         *Bot:* {} {}\n",
-        db_emoji, status.database,
-        notifier_emoji, status.notifier,
-        audit_emoji, status.audit,
-        bot_emoji, status.bot
+         *Database:* {}\n\
+         *Notifier:* {}\n\
+         *Audit:* {}\n\
+         *Bot:* {}\n",
+        format_field("Database", &previous_status.database, &current_status.database),
+        format_field("Notifier", &previous_status.notifier, &current_status.notifier),
+        format_field("Audit", &previous_status.audit, &current_status.audit),
+        format_field("Bot", &previous_status.bot, &current_status.bot),
     );
-    
+
     notifier::emit::system_notifications(bot, message.as_str(), pool, 0).await;
 
     Ok(())
+}
+
+// Helper function to format each field with possible change indication
+fn format_field(component: &str, previous: &str, current: &str) -> String {
+    let prev_emoji = match previous {
+        "ok" => "✅",
+        "error" => "❌",
+        _ => "❓",
+    };
+
+    let current_emoji = match current {
+        "ok" => "✅",
+        "error" => "❌",
+        _ => "❓",
+    };
+
+    if previous != current {
+        format!("*{}:* {} {} ➡️ {} {}", component, prev_emoji, previous, current_emoji, current)
+    } else {
+        format!("*{}:* {} {}", component, current_emoji, current)
+    }
 }

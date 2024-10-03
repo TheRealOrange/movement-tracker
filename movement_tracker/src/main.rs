@@ -27,7 +27,7 @@ use tokio::sync::Mutex;
 
 use crate::controllers::db;
 use crate::types::{RoleType, UsrType};
-use crate::healthcheck::monitor::CurrentHealthStatus;
+use crate::healthcheck::monitor::BotHealthStatus;
 
 #[derive(Clone)]
 struct AppState {
@@ -38,7 +38,7 @@ struct AppState {
     bot: Bot,
     bot_health_check_active: bool,
     bot_health_check_msgs: Arc<Mutex<LinkedList<MessageId>>>,
-    health_status: Arc<Mutex<CurrentHealthStatus>>
+    health_status: Arc<Mutex<BotHealthStatus>>
 }
 
 pub(crate) static APP_TIMEZONE: Lazy<Tz> = Lazy::new(get_timezone);
@@ -116,7 +116,7 @@ async fn main() {
         bot: bot.clone(),
         bot_health_check_active, // Set bot health check active flag
         bot_health_check_msgs: Arc::new(Mutex::new(LinkedList::new())), // queue to track sent messages
-        health_status: Arc::new(Mutex::new(CurrentHealthStatus::new()))
+        health_status: Arc::new(Mutex::new(BotHealthStatus::new()))
     });
 
     // Clone the State for Notifier and Audit Tasks
