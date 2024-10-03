@@ -123,16 +123,16 @@ pub(crate) async fn get_system_notifications_enabled(conn: &PgPool) -> Result<Ve
     match chat_ids {
         Ok(ids) => {
             if !ids.is_empty() {
-                log::info!("Retrieved chat_ids with system notifications enabled: {:?} IDs retrieved", ids.len());
+                log::info!("Retrieved chat_ids with SYSTEM notifications enabled: {:?} IDs retrieved", ids.len());
             } else {
-                log::info!("No chats with system notifications were retrieved.");
+                log::info!("No chats with SYSTEM notifications were retrieved.");
             }
             // Return the vector of chat_ids
             Ok(ids)
         }
         Err(e) => {
             // Log the error without referencing chat_id
-            log::error!("Error retrieving notification settings: {}", e);
+            log::error!("Error retrieving SYSTEM notification settings: {}", e);
             Err(e)
         }
     }
@@ -155,16 +155,16 @@ pub(crate) async fn get_register_notifications_enabled(conn: &PgPool) -> Result<
     match chat_ids {
         Ok(ids) => {
             if !ids.is_empty() {
-                log::info!("Retrieved chat_ids with register notifications enabled: {:?} IDs retrieved", ids.len());
+                log::info!("Retrieved chat_ids with REGISTER notifications enabled: {:?} IDs retrieved", ids.len());
             } else {
-                log::info!("No chats with register notifications were retrieved.");
+                log::info!("No chats with REGISTER notifications were retrieved.");
             }
             // Return the vector of chat_ids
             Ok(ids)
         }
         Err(e) => {
             // Log the error without referencing chat_id
-            log::error!("Error retrieving notification settings: {}", e);
+            log::error!("Error retrieving REGISTER notification settings: {}", e);
             Err(e)
         }
     }
@@ -187,16 +187,16 @@ pub(crate) async fn get_availability_notifications_enabled(conn: &PgPool) -> Res
     match chat_ids {
         Ok(ids) => {
             if !ids.is_empty() {
-                log::info!("Retrieved chat_ids with availability notifications enabled: {:?} IDs retrieved", ids.len());
+                log::info!("Retrieved chat_ids with AVAILABILITY notifications enabled: {:?} IDs retrieved", ids.len());
             } else {
-                log::info!("No chats with availability notifications were retrieved.");
+                log::info!("No chats with AVAILABILITY notifications were retrieved.");
             }
             // Return the vector of chat_ids
             Ok(ids)
         }
         Err(e) => {
             // Log the error without referencing chat_id
-            log::error!("Error retrieving notification settings: {}", e);
+            log::error!("Error retrieving AVAILABILITY notification settings: {}", e);
             Err(e)
         }
     }
@@ -219,16 +219,16 @@ pub(crate) async fn get_plan_notifications_enabled(conn: &PgPool) -> Result<Vec<
     match chat_ids {
         Ok(ids) => {
             if !ids.is_empty() {
-                log::info!("Retrieved chat_ids with plan notifications enabled: {:?} IDs retrieved", ids.len());
+                log::info!("Retrieved chat_ids with PLAN notifications enabled: {:?} IDs retrieved", ids.len());
             } else {
-                log::info!("No chats with plan notifications were retrieved.");
+                log::info!("No chats with PLAN notifications were retrieved.");
             }
             // Return the vector of chat_ids
             Ok(ids)
         }
         Err(e) => {
             // Log the error without referencing chat_id
-            log::error!("Error retrieving notification settings: {}", e);
+            log::error!("Error retrieving PLAN notification settings: {}", e);
             Err(e)
         }
     }
@@ -251,16 +251,16 @@ pub(crate) async fn get_conflict_notifications_enabled(conn: &PgPool) -> Result<
     match chat_ids {
         Ok(ids) => {
             if !ids.is_empty() {
-                log::info!("Retrieved chat_ids with conflict notifications enabled: {:?} IDs retrieved", ids.len());
+                log::info!("Retrieved chat_ids with CONFLICT notifications enabled: {:?} IDs retrieved", ids.len());
             } else {
-                log::info!("No chats with conflict notifications were retrieved.");
+                log::info!("No chats with CONFLICT notifications were retrieved.");
             }
             // Return the vector of chat_ids
             Ok(ids)
         }
         Err(e) => {
             // Log the error without referencing chat_id
-            log::error!("Error retrieving notification settings: {}", e);
+            log::error!("Error retrieving CONFLICT notification settings: {}", e);
             Err(e)
         }
     }
@@ -292,6 +292,38 @@ pub(crate) async fn soft_delete_notification_settings(
         }
         Err(e) => {
             log::error!("Error soft deleting notification settings for chat_id {}: {}", chat_id, e);
+            Err(e)
+        }
+    }
+}
+
+pub(crate) async fn get_notifications_enabled(conn: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    // Execute the query to fetch all chat_id values where notifications are enabled
+    let chat_ids = sqlx::query_scalar!(
+        r#"
+        SELECT
+            chat_id
+        FROM notification_settings
+        WHERE is_valid = TRUE;
+        "#
+    )
+        .fetch_all(conn)
+        .await;
+
+    // Handle the result of the query
+    match chat_ids {
+        Ok(ids) => {
+            if !ids.is_empty() {
+                log::info!("Retrieved chat_ids with notifications enabled: {:?} IDs retrieved", ids.len());
+            } else {
+                log::info!("No chats with notifications enabled were retrieved.");
+            }
+            // Return the vector of chat_ids
+            Ok(ids)
+        }
+        Err(e) => {
+            // Log the error without referencing chat_id
+            log::error!("Error retrieving notification settings: {}", e);
             Err(e)
         }
     }

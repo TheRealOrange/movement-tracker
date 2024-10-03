@@ -5,7 +5,7 @@ mod utils;
 mod notifier;
 mod healthcheck;
 
-use std::collections::LinkedList;
+use std::collections::{HashMap, LinkedList};
 use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
@@ -38,7 +38,8 @@ struct AppState {
     bot: Bot,
     bot_health_check_active: bool,
     bot_health_check_msgs: Arc<Mutex<LinkedList<MessageId>>>,
-    health_status: Arc<Mutex<BotHealthStatus>>
+    health_status: Arc<Mutex<BotHealthStatus>>,
+    notification_remove_list: Arc<Mutex<HashMap<ChatId, u8>>>,
 }
 
 pub(crate) static APP_TIMEZONE: Lazy<Tz> = Lazy::new(get_timezone);
@@ -116,7 +117,8 @@ async fn main() {
         bot: bot.clone(),
         bot_health_check_active, // Set bot health check active flag
         bot_health_check_msgs: Arc::new(Mutex::new(LinkedList::new())), // queue to track sent messages
-        health_status: Arc::new(Mutex::new(BotHealthStatus::new()))
+        health_status: Arc::new(Mutex::new(BotHealthStatus::new())),
+        notification_remove_list: Arc::new(Mutex::new(HashMap::new())) // track errored chats to remove
     });
 
     // Clone the State for Notifier and Audit Tasks
