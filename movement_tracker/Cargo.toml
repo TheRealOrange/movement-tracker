@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 # axum and tower for health check endpoint, as well as teloxide webhooks
-axum = "0.7.6"
+axum = "0.7"
 tower = "0.5.1"
 tower-http = { version = "0.6.1", features = ["trace"] }
 # teloxide dependencies for interaction with the telegram bot api
@@ -30,8 +30,8 @@ chrono = "0.4"
 chrono-tz = "0.10"
 sys-locale = "=0.3.1"
 # for date matching
-regex = "1.10.5"
-once_cell = "1.19.0"
+regex = "1.11"
+once_cell = "1.20"
 # Procedural macro dependency
 callback_data = { path = "../libs/callback_data" }
 # dependencies for proc macro
