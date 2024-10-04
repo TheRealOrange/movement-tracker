@@ -29,15 +29,16 @@ pub(crate) async fn start_audit_task(state: Arc<AppState>) -> Result<(), sqlx::E
     }
 }
 
-async fn check_remove_chat(chat_id: ChatId, error: bool, state: &AppState) -> Result<(), sqlx::Error> {
+async fn check_remove_chat(chat_id: ChatId, success: bool, state: &AppState) -> Result<(), sqlx::Error> {
     let mut errored_set = state.notification_remove_list.lock().await;
-    if !error {
+    if success {
         *errored_set.entry(chat_id).or_insert(0) = 0;
     } else {
         *errored_set.entry(chat_id).or_insert(0) += 1;
     }
 
     if errored_set[&chat_id] > 2 {
+        log::warn!("Removing chat ID ({}) from notification list", chat_id.0);
         controllers::notifications::soft_delete_notification_settings(&state.db_pool, chat_id.0).await?;
     }
 
